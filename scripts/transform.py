@@ -107,7 +107,7 @@ NATIVE_PROPERTIES = {
     "display", "flex-direction", "flex-wrap", "justify-content", "align-items",
     "align-content", "align-self", "flex-grow", "flex-shrink", "flex-reverse",
     "column-gap", "row-gap", "gap", "grid-column-gap", "grid-row-gap",
-    "grid-column-count", "grid-child-rules",
+    "grid-column-count", "grid-child-rules", "grid-column-min-width-unit",
     "position", "top", "right", "bottom", "left", "z-index",
     "overflow", "overflow-x", "overflow-y",
     # Espaciado
@@ -2077,6 +2077,13 @@ def apply_grid_child_rules(node: Dict, default_rules: Dict) -> None:
             # en grids puros 1x1 que no necesitan grid-child-rules).
             if any(r["column-span"] or r["row-span"] for r in rules_array):
                 default_rules[grid_class]["grid-child-rules"] = rules_array
+            # Emitir grid-column-min-width-unit por default para que el grid
+            # no haga overflow horizontal en items intrinsecamente anchos.
+            # Sin esta propiedad, los items grid empujan el contenedor fuera del
+            # viewport cuando el contenido es ancho (descubierto empiricamente).
+            # Solo se inyecta si el usuario no lo definio explicitamente.
+            if "grid-column-min-width-unit" not in default_rules[grid_class]:
+                default_rules[grid_class]["grid-column-min-width-unit"] = "auto"
 
     for child in children:
         apply_grid_child_rules(child, default_rules)

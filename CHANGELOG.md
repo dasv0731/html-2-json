@@ -4,6 +4,24 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-15 — Auto-emisión de `grid-column-min-width-unit: auto` en grid containers
+
+### Bug descubierto en uso real
+
+Usuario reportó que un grid container con items intrínsecamente anchos hacía overflow horizontal (se salía del viewport). La solución que aplicó manualmente al JSON tras pegar: agregar `grid-column-min-width-unit: "auto"` al container.
+
+Esto es una propiedad propia de Oxygen Grid que cuando vale `"auto"` permite que las columnas se ajusten al ancho disponible en lugar de respetar el min-content de los items.
+
+### Fix
+
+En `apply_grid_child_rules`, después de inyectar `grid-child-rules`, también inyectar `grid-column-min-width-unit: "auto"` en el container si el usuario no lo definió explícitamente. Aplica a TODOS los grid containers (con o sin spans).
+
+Agregada `grid-column-min-width-unit` a `NATIVE_PROPERTIES`.
+
+Fixtures afectados: `grid-child-rules-spans` y `bug-grid-display-espurio` (sus expected.json se regeneraron). Suite 19/19.
+
+---
+
 ## 2026-05-15 — Fix: gradients van a `custom-css`, no a campo nativo
 
 ### Bug encontrado en uso real

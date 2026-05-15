@@ -1,0 +1,12 @@
+.hero {
+  padding: clamp(16px, 4vw, 48px);
+  margin: var(--spacing-y) var(--spacing-x);
+  border: 2px solid rgb(37, 99, 235);
+  border-radius: clamp(4px, 1vw, 12px);
+  background-color: #ffffff;
+}
+
+.hero__title {
+  font-size: calc(24px + 1vw);
+  color: #111111;
+}

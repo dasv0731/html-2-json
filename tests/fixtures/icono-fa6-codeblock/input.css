@@ -1,0 +1,9 @@
+.iconStack {
+  display: flex;
+  gap: 12px;
+}
+
+.iconStack__icon {
+  font-size: 24px;
+  color: #374151;
+}

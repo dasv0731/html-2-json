@@ -1,0 +1,28 @@
+.quote {
+  position: relative;
+  padding: 24px 32px;
+  background-color: #f9fafb;
+}
+
+.quote::before {
+  content: "\201C";
+  position: absolute;
+  top: 0;
+  left: 8px;
+  font-size: 48px;
+  color: #9ca3af;
+}
+
+.quote::after {
+  content: "\201D";
+  position: absolute;
+  bottom: 0;
+  right: 8px;
+  font-size: 48px;
+  color: #9ca3af;
+}
+
+.quote__text {
+  font-style: italic;
+  color: #374151;
+}

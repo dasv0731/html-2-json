@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Backups locales (innecesarios con git)
+.backup-*/
+*.bak
+*.orig
+
+# Editores
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+.DS_Store
+
+# Archivos de prueba locales
+/tmp/
+*.tmp
+
+# Outputs de pruebas (no son parte del skill)
+test_*.json
+test_*.html
+test_*.css

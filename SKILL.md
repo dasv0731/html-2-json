@@ -91,6 +91,7 @@ El input es estricto. Si el HTML/CSS no cumple, NO ejecutes el script: dile al u
 
 ### CSS
 - **Una regla por clase**. Selectores complejos con combinadores (`.foo > .bar`, `.foo + .bar`, `.foo .bar`, `[data-x]`, etc.) van automáticamente al Code Block agregado.
+- **Sin selectores globales del sitio**: `:root`, `*`, `*::before`, `*::after`, `html`, `body`, `a`, `p`, `img`, `h1-h6`, etc. (tag puros sin clase) se **omiten** con WARN. Razón: si llegaran al Code Block del bloque reusable, romperían estilos del template/page al pegar. Si necesitás esos estilos en el componente, **migrá las reglas a una clase específica** (ej. `.miBloque__base { ... }`) y aplicá la clase al HTML. Lo mismo para variables CSS: en lugar de `:root { --c-red: ... }`, definí las vars sobre la clase base del componente.
 - **Pseudo-clases y pseudo-elementos soportados como states nativos** (ver tabla más abajo). Las no listadas van al Code Block.
 - **Media queries con `max-width`** se mapean a breakpoints nativos de Oxygen. Las que usan `min-width` o cualquier otra forma van al Code Block con WARN — el skill NO rechaza el input, solo avisa.
 - **Breakpoints aceptados** (con tolerancia ±1px):

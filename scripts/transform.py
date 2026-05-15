@@ -270,6 +270,45 @@ def _parse_media_prelude(prelude) -> Optional[str]:
     return None
 
 
+def _is_global_selector(sel: str) -> bool:
+    """
+    Detecta selectores que aplican globalmente al sitio destino (no a clases
+    locales del componente). Estos selectores NO deben llegar al code-block
+    porque al pegar el bloque reusable, romperian estilos del template/page.
+
+    Casos detectados:
+      - :root, :root::before, etc.
+      - * (universal), *::before, *::after, *,*::before,*::after
+      - Tag puros sin clase: body, html, a, p, img, h1-h6, div, span, etc.
+      - Tag con pseudo-elemento: body::before, a:hover, etc.
+
+    Conserva como NO global (deben pasar al flujo normal):
+      - .clase, .clase:hover, .clase::before
+      - Selectores complejos con clase (.foo .bar) -> Code Block normal
+    """
+    s = sel.strip()
+    if not s:
+        return False
+    # :root y variantes
+    if s == ":root" or s.startswith(":root:") or s.startswith(":root::"):
+        return True
+    # Universal *
+    if s == "*" or s.startswith("*:") or s.startswith("*::"):
+        return True
+    # Si contiene clase o ID, NO es global
+    if "." in s or "#" in s:
+        return False
+    # Si contiene atributo, combinador, etc., dejar al flujo normal (code-block)
+    if any(c in s for c in ("[", ">", "+", "~", " ")):
+        return False
+    # Tag puro (con o sin pseudo): body, body:hover, html, a, p::before, etc.
+    # Extraer el tag base (antes de cualquier `:`)
+    tag_part = s.split(":", 1)[0]
+    if tag_part and tag_part.replace("-", "").isalpha():
+        return True
+    return False
+
+
 def _process_qualified_rule(rule, default_rules, default_state_rules, codeblock_rules, breakpoint=None, media_rules=None):
     """Procesa una regla qualified-rule y la enruta segun el selector."""
     selector_text = tinycss2.serialize(rule.prelude).strip()
@@ -278,6 +317,18 @@ def _process_qualified_rule(rule, default_rules, default_state_rules, codeblock_
     # Determinar tipo de selector
     selectors = [s.strip() for s in selector_text.split(",")]
     for sel in selectors:
+        # Selectores globales del sitio (`:root`, tag puros como body/html/a/p/img/*,
+        # universal con pseudo). Si los emitiramos al code-block del bloque reusable,
+        # afectarian a TODA la pagina al pegarlo (rompen estilos del template). Los
+        # omitimos con WARN claro: el usuario debe migrar a clases especificas si
+        # necesita esos estilos en el componente.
+        if _is_global_selector(sel):
+            WARN.add(
+                f"Selector global '{sel}' omitido (rompe el sitio destino al pegar). "
+                f"Migra esas reglas a una clase especifica del componente "
+                f"(ej. `.miBloque__base`) y aplica la clase al HTML."
+            )
+            continue
         target = _classify_selector(sel)
         if target is None:
             # Selector complejo -> Code Block

@@ -1,0 +1,27 @@
+:root {
+  --c-red: #E30613;
+  --c-dark: #1F1A12;
+}
+
+*,*::before,*::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: "Inter", sans-serif;
+}
+
+a { color: inherit; }
+p { line-height: 1.5; }
+img { max-width: 100%; }
+
+.comp {
+  padding: 20px;
+  background-color: #ffffff;
+}
+
+.comp__text {
+  font-size: 16px;
+  color: #1F1A12;
+}

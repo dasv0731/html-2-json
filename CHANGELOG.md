@@ -4,6 +4,44 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-15 — Selectores globales del sitio omitidos del code-block
+
+### Bug encontrado en uso real
+
+Usuario reportó que pegar el bloque rompía el sitio destino. Causa: el CSS de entrada tenía `:root` con variables CSS, `*, *::before, *::after { box-sizing }`, `body { ... }`, `html`, `a`, `p`, `img` — selectores que aplican GLOBALMENTE al sitio. El skill los metía en el `ct_code_block` agregado del bloque reusable, y al pegarlo en una página, ese CSS se inyectaba como global de la página, sobreescribiendo el reset del template Oxygen.
+
+### Fix
+
+Nueva función `_is_global_selector` en `_process_qualified_rule`. Detecta:
+- `:root` y variantes
+- `*`, `*::before`, `*::after`
+- Tag puros sin clase (`body`, `html`, `a`, `p`, `img`, `h1-h6`, `div`, etc.)
+- Tag con pseudo (`body::before`, `a:hover`, etc.)
+
+Estos selectores **NO se emiten** al code-block. Se emite un WARN claro: "Selector global '<X>' omitido (rompe el sitio destino al pegar). Migra esas reglas a una clase específica del componente."
+
+### Implicación para el usuario
+
+Si necesita esos estilos en el componente, debe migrarlos a clases específicas:
+
+```css
+/* MAL: aplica al body de toda la página al pegar */
+body { font-family: "Inter"; }
+:root { --c-red: #E30613; }
+
+/* BIEN: aplica solo a la clase del componente */
+.miBloque__base {
+  font-family: "Inter";
+  --c-red: #E30613;
+}
+```
+
+Fixture: `selectores-globales-omitidos`. Suite 21/21.
+
+Doc actualizada en SKILL.md sección "Contrato de input" / CSS.
+
+---
+
 ## 2026-05-15 — Spans vacíos decorativos → `ct_div_block` con `useCustomTag`
 
 ### Bug encontrado en uso real

@@ -130,6 +130,59 @@ Para `:before` y `::after`, el valor de `content` se normaliza quitando comillas
 - Selectores con combinadores (`.foo > .bar`, `.foo .bar`, `.foo + .bar`)
 - Selectores con `[atributo]`
 
+### CSS Grid: reglas para mapeo nativo
+
+Oxygen Grid es más limitado que CSS Grid estándar. El skill mapea a propiedades nativas SI Y SOLO SI:
+
+| Propiedad CSS | Mapeo Oxygen | Condición |
+|---|---|---|
+| `display: grid` | `display: grid` | Siempre |
+| `grid-template-columns: repeat(N, 1fr)` o `1fr 1fr ... 1fr` (N iguales) | `grid-column-count: N` | Solo columnas de ancho uniforme |
+| `gap: X` o `gap: X Y` (en grid container) | `grid-row-gap: X` + `grid-column-gap: Y` | El skill descompone automáticamente cuando el container es `display: grid` |
+| `grid-column: span N` en un hijo | entrada con `column-span: "N"` en `grid-child-rules` del container | El hijo necesita una clase única donde declarar el span |
+| `grid-row: span N` en un hijo | entrada con `row-span: "N"` en `grid-child-rules` del container | Igual |
+
+**Cómo escribir el CSS para que el skill genere `grid-child-rules` correctamente:**
+
+```css
+/* Container */
+.gridA { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+
+/* Hijos por clase modifier (BEM) */
+.gridA__cell--wide { grid-column: span 2; }
+.gridA__cell--tall { grid-row: span 2; }
+.gridA__cell--big  { grid-column: span 3; grid-row: span 2; }
+```
+
+```html
+<div class="gridA">
+  <div class="gridA__cell"></div>                          <!-- 1×1 default -->
+  <div class="gridA__cell gridA__cell--big"></div>         <!-- 3×2 -->
+  <div class="gridA__cell gridA__cell--wide"></div>        <!-- 2×1 -->
+  <div class="gridA__cell gridA__cell--tall"></div>        <!-- 1×2 -->
+  <div class="gridA__cell"></div>                          <!-- 1×1 default -->
+</div>
+```
+
+El skill consulta las clases de cada hijo del grid en orden posicional. Para hijos con varias clases (BEM base + modifier), mergea spans desde todas. Si ninguna clase del hijo declara span, queda como `column-span: "", row-span: ""` (1×1).
+
+**Lo que va a `custom-css` (no soportado nativo):**
+
+- `grid-template-columns: 1fr 2fr 1fr` y similares (anchos desiguales) — Oxygen Grid no acepta proporciones desiguales.
+- `grid-template-columns: 200px 1fr` (mezcla unidades) — idem.
+- `grid-template-rows` con valores explícitos.
+- `grid-template-areas`.
+- `grid-column: 2 / 4` (posicionamiento absoluto start/end) — usá `span N` en su lugar.
+- `grid-area: foo`.
+- `grid-row: N / M`.
+- `grid-auto-flow`, `grid-auto-rows`, `grid-auto-columns`.
+
+**Limitaciones del mapeo actual:**
+
+- Si querés que el array `grid-child-rules` también se emita en breakpoints, escribí las spans dentro del media query con clases dedicadas. El skill **no replica automáticamente** el array de top-level a cada breakpoint hoy.
+- Si un grid container tiene hijos sin clase (`<div></div>` desnudo), reciben `column-span: "", row-span: ""` (default 1×1).
+- Hijos inyectados por el detector de rich text (caso raro en grids) podrían descuadrar los índices del array. Si tu grid contiene texto suelto, usá divs intermedios.
+
 ### Regla operativa: clases únicas por componente
 
 Oxygen tiene una **tabla global única de selectores**. Si pegas dos componentes que usan la misma clase (ej. `.btn`) con propiedades distintas, el segundo pegado NO sobrescribe al primero — la clase mantiene los valores del primer pegado. El segundo componente quedará referenciando una clase que no tiene los estilos esperados.

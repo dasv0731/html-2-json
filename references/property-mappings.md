@@ -154,21 +154,36 @@ El skill mapea a Oxygen Grid cuando TODAS estas condiciones se cumplen:
 "grid-column-gap": "<gap-en-px>",
 "grid-row-gap": "<row-gap-en-px>",
 "grid-child-rules": [
-  null,
-  {"child-index": 1, "column-span": "<N>", "row-span": "<N>"},
-  {"child-index": 2, "column-span": "<N>", "row-span": "<N>"}
+  {"child-index": 0, "column-span": "",  "row-span": ""},
+  {"child-index": 1, "column-span": "3", "row-span": "2"},
+  {"child-index": 2, "column-span": "2", "row-span": ""}
 ]
 ```
 
-- El primer elemento del array es siempre `null`. Los hijos comienzan en índice 1.
-- Si un hijo no tiene span configurado, se emite con `column-span: ""` y `row-span: ""` (strings vacíos).
-- En breakpoints, **repetir el array completo de `grid-child-rules`** y también `display: grid`.
+**Formato real validado empíricamente contra JSONs reales de Oxygen:**
+
+- **0-based**: el primer hijo es `child-index: 0`, no 1.
+- **Una entrada por cada hijo del grid**, incluidos los que son default 1×1. NO truncar al último no-default.
+- Para hijo default: `{"child-index": N, "column-span": "", "row-span": ""}` (strings vacíos = 1×1).
+- Para hijo con spans: valor numérico como string (`"3"`, `"2"`).
+- Para spans solo en una dimensión: la otra queda como `""`.
+- Variante alternativa válida también aceptada por Oxygen: `null` en lugar del objeto con strings vacíos. El skill emite el objeto explícito (formato canónico).
+
+**Cuándo NO emite `grid-child-rules`**: si ningún hijo del grid tiene span declarado (todos default), el skill omite el array para evitar ruido. Oxygen renderiza el grid correctamente sin ese campo.
+
+**Mergeo de spans por clases múltiples**: si un hijo tiene `class="item item--wide"` y `.item--wide` aporta `grid-column: span 2`, el skill mergea desde todas las clases del hijo.
+
+### Limitación: breakpoints
+
+Hoy el skill **no replica automáticamente** `grid-child-rules` ni `display: grid` en cada breakpoint donde Oxygen lo necesitaría (según el comportamiento observado en JSONs reales).
+
+Workaround: si el grid cambia su layout en un breakpoint, escribí explícitamente todas las propiedades del breakpoint (incluyendo `display: grid` y declaraciones por clase con sus spans). Sigue siendo limitado.
 
 ### Cuándo no mapea nativo
 
 Si el grid es complejo (anchos desiguales, posicionamiento absoluto, áreas), enviar a `custom-css`:
 
-- `grid-template-columns`, `grid-template-rows`, `grid-template-areas`, `grid-area`, `grid-column`, `grid-row` con valores no soportados → `custom-css` de la clase.
+- `grid-template-columns`, `grid-template-rows`, `grid-template-areas`, `grid-area`, `grid-column: N/M`, `grid-row: N/M` con valores no soportados → `custom-css` de la clase.
 - Pero el `display: grid` sí va nativo (Oxygen lo entiende).
 - Y `gap`, `column-gap`, `row-gap` van nativos como `grid-column-gap`, `grid-row-gap` cuando son simples.
 

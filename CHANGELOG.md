@@ -4,6 +4,50 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-15 — Soporte de `grid-child-rules` para grids con spans
+
+### Feature nuevo
+
+Cuando un container `display: grid` tiene hijos con `grid-column: span N` y/o `grid-row: span N` en sus clases CSS, el skill ahora **construye automáticamente el array `grid-child-rules`** (formato propio de Oxygen) en el container, en vez de mandar esas propiedades a `custom-css` del hijo.
+
+Formato emitido (validado empíricamente contra JSON real de Oxygen pegado por el usuario):
+
+```json
+"grid-child-rules": [
+  {"child-index": 0, "column-span": "",  "row-span": ""},
+  {"child-index": 1, "column-span": "3", "row-span": "2"},
+  {"child-index": 2, "column-span": "2", "row-span": ""},
+  {"child-index": 3, "column-span": "",  "row-span": "2"},
+  {"child-index": 4, "column-span": "1", "row-span": "1"}
+]
+```
+
+**Reglas del formato (descubiertas pegando JSONs reales):**
+
+- Una entrada por hijo, **no truncar** al último no-default.
+- Hijos sin span: `column-span: ""`, `row-span: ""` (Oxygen los interpreta como 1×1).
+- Solo se inyecta el array si **al menos un hijo tiene span ≠ default**.
+- Spans de un mismo hijo pueden venir de múltiples clases (BEM modifier mergea con base).
+
+### Implementación
+
+1. **Parser CSS** (`_extract_grid_span_metadata`): cuando una regla de clase tiene `grid-column: span N` o `grid-row: span N`, esas dos propiedades se sacan del dict normal y se guardan como metadata `__grid_span_column__` / `__grid_span_row__`. NO van a custom-css.
+
+2. **Post-process** (`apply_grid_child_rules`): después de construir el árbol de componentes y antes de emitir el bloque de clases, recorre el árbol. Para cada `ct_div_block` cuyo CSS contiene `display: grid`, mira los hijos en orden posicional y construye el array `grid-child-rules` consultando la metadata de cada clase. Inyecta el array en `default_rules[container_class]` para que `build_classes_block` lo emita.
+
+3. **Filtro de metadata**: `expand_shorthands` y `convert_properties` ignoran las keys `__grid_span_*` para que no contaminen el output.
+
+4. **Caso especial en `convert_properties`**: `grid-child-rules` con valor `list` se emite tal cual (sin pasar por `_is_property_native` ni `_convert_value_with_unit` que asumen strings).
+
+Fixture: `grid-child-rules-spans` — grid de 6 columnas con 5 hijos, 3 de ellos con spans. Suite 18/18.
+
+### Limitaciones
+
+- Solo se mapean spans en la forma `span N`. Otras formas (`grid-column: 2 / 4`, `grid-area: foo`) caen a `custom-css` por el flujo normal.
+- Hijos inyectados automáticamente por el detector de rich text (no es el caso típico en grids) podrían descuadrar los índices. Validar empíricamente si aparece el caso.
+
+---
+
 ## 2026-05-15 — Descubrimientos colaterales: blockquote, classes FA, absorción inline
 
 Continuación de la sesión de tests. Tres descubrimientos surgidos al revisar baselines de la suite expandida; dos arreglados con TDD, uno documentado como comportamiento esperado.

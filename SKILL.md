@@ -169,7 +169,29 @@ Sé honesto con el usuario sobre estas:
 - **CSS Grid con anchos desiguales** (`grid-template-columns: 1fr 2fr 1fr`): Oxygen Grid solo soporta columnas iguales. Las proporciones desiguales van al `custom-css` o al Code Block. Avisar.
 - **`flex-basis`**: no soportado nativamente en Oxygen. Va a `custom-css`.
 - **`flex-direction: row-reverse` / `column-reverse`**: se descomponen en `flex-direction` + `flex-reverse: reverse` (propiedad propia de Oxygen).
-- **`display: grid` con posicionamiento por `grid-area` o `grid-column: 2 / 4`**: Oxygen Grid usa un modelo distinto (`grid-child-rules` con `column-span` / `row-span`). El skill traduce span simples; posicionamiento absoluto va al `custom-css` o al Code Block.
+- **`display: grid` con posicionamiento por `grid-area` o `grid-column: 2 / 4`**: Oxygen Grid usa un modelo distinto (`grid-child-rules` con `column-span` / `row-span`). El skill traduce `grid-column: span N` y `grid-row: span N` automáticamente al array `grid-child-rules` del container (ver "Generación automática de `grid-child-rules`" más abajo). Otras formas de posicionamiento (`grid-area: foo`, `grid-column: 2 / 4`) van al `custom-css` o al Code Block.
+
+### Generación automática de `grid-child-rules`
+
+Cuando un container `display: grid` tiene hijos con `grid-column: span N` y/o `grid-row: span N` en sus clases, el skill construye automáticamente el array `grid-child-rules` (formato propio de Oxygen) en el container.
+
+Formato emitido (validado empíricamente contra JSONs reales de Oxygen):
+```json
+"grid-child-rules": [
+  {"child-index": 0, "column-span": "",  "row-span": ""},   // default 1x1
+  {"child-index": 1, "column-span": "3", "row-span": "2"},  // 3 cols x 2 rows
+  {"child-index": 2, "column-span": "2", "row-span": ""},   // 2 cols, row default
+  {"child-index": 3, "column-span": "",  "row-span": "2"},  // col default, 2 rows
+  {"child-index": 4, "column-span": "1", "row-span": "1"}   // 1x1 explícito
+]
+```
+
+Reglas:
+- Una entrada por hijo (NO se trunca al último no-default).
+- Hijos sin span declarado: `column-span: ""`, `row-span: ""` (Oxygen los interpreta como 1×1).
+- Solo se emite el array si **al menos un hijo tiene span ≠ default** (evita ruido en grids puros 1×1).
+- Las clases del hijo pueden distribuir spans (`.item--wide` aporta `column-span`, `.item--tall` aporta `row-span`). El skill mergea desde todas las clases del hijo.
+- `grid-column: span N` y `grid-row: span N` se extraen de `custom-css` y no aparecen ahí — viven solo en el array.
 - **`<ul>` y `<li>`**: mapeo semántico con `useCustomTag`. `<ul>/<ol>` → `ct_div_block` con `useCustomTag: true, tag: ul/ol`. `<li>` con texto plano → `ct_text_block[li]`. `<li>` con HTML inline mixto (incluyendo `<a>`, `<em>`, `<strong>`, `<br>`) → `oxy_rich_text[li]` con contenido inline directo (sin `<p>` envolvente). `<li>` con tags estructurales hijos (div, h1-h6, ul anidado) → `ct_div_block[li]`. Validado contra exports reales de Oxygen.
 - **Inyección de display en media queries (asimétrica entre flex y grid)**: cuando un breakpoint tiene `flex-direction`/`flex-wrap`/`justify-content` y la clase top-level es `display: flex`, el skill inyecta `display: flex` en ese breakpoint para que el panel UI de Oxygen muestre los controles flex. Para grid NO se hace lo paralelo: el `display: grid` de top-level se hereda en cascada CSS y emitirlo en cada breakpoint generaba ruido al editar (era el "bug del display:grid espurio"). Si necesitas display:grid explícito en un breakpoint, escribilo en tu CSS.
 - **`<button>` HTML: mapeo por trío según contenido** (paralelo a `<li>`):

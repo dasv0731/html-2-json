@@ -299,6 +299,9 @@ def _process_qualified_rule(rule, default_rules, default_state_rules, codeblock_
             if state is None:
                 if cls not in default_rules:
                     default_rules[cls] = {}
+                # Extraer grid-column/grid-row span N como metadata especial
+                # para que el post-process construya grid-child-rules en el container.
+                declarations = _extract_grid_span_metadata(declarations)
                 default_rules[cls].update(declarations)
             else:
                 if cls not in default_state_rules:
@@ -320,6 +323,32 @@ def _process_qualified_rule(rule, default_rules, default_state_rules, codeblock_
                 if state not in media_rules[cls][breakpoint]["__states__"]:
                     media_rules[cls][breakpoint]["__states__"][state] = {}
                 media_rules[cls][breakpoint]["__states__"][state].update(declarations)
+
+
+def _extract_grid_span_metadata(declarations: Dict[str, str]) -> Dict[str, str]:
+    """
+    Si una regla CSS de clase tiene `grid-column: span N` o `grid-row: span N`,
+    extraerlas a metadata especial (__grid_span_column__, __grid_span_row__) y
+    quitarlas del dict de declaraciones normales. El post-process apply_grid_child_rules
+    las usa para construir el array `grid-child-rules` en el container grid.
+
+    Solo aplica al formato `span N` (donde N es entero >= 1). Otras formas
+    (`grid-column: 2/4`, `grid-area: foo`) no se tocan y caen a custom-css por el
+    flujo normal.
+    """
+    out = dict(declarations)
+    span_re = re.compile(r"^\s*span\s+(\d+)\s*$")
+    if "grid-column" in out:
+        m = span_re.match(out["grid-column"])
+        if m:
+            out["__grid_span_column__"] = m.group(1)
+            del out["grid-column"]
+    if "grid-row" in out:
+        m = span_re.match(out["grid-row"])
+        if m:
+            out["__grid_span_row__"] = m.group(1)
+            del out["grid-row"]
+    return out
 
 
 def _strip_content_quotes(value: str) -> str:
@@ -448,6 +477,10 @@ def expand_shorthands(props: Dict[str, str]) -> Dict[str, str]:
     for prop, val in props.items():
         # __states__ es metadata interna (dict de states); se preserva al final, no se procesa aqui.
         if prop == "__states__":
+            continue
+        # __grid_span_* es metadata para grid-child-rules; el post-process la consume,
+        # no debe llegar al output normal.
+        if prop in ("__grid_span_column__", "__grid_span_row__"):
             continue
         if prop in ("padding", "margin"):
             out.update(_expand_box(prop, val))
@@ -725,9 +758,18 @@ def convert_properties(props: Dict[str, str], block_type: Optional[str] = None) 
     for prop, val in props.items():
         if prop == "__states__":
             continue
+        # Metadata interna de spans (consumida por apply_grid_child_rules en otra fase).
+        if prop in ("__grid_span_column__", "__grid_span_row__"):
+            continue
         if prop.startswith("__custom_css__"):
             real_prop = prop.replace("__custom_css__", "")
             custom_css.append(f"{real_prop}: {val};")
+            continue
+
+        # Caso especial: grid-child-rules es un array de objetos, no un string.
+        # Emitirlo tal cual; _is_property_native asume valores string.
+        if prop == "grid-child-rules" and isinstance(val, list):
+            oxygen[prop] = val
             continue
 
         # Caso especial: grid-template-columns -> grid-column-count si es repeat(N, 1fr) o N veces 1fr
@@ -1969,6 +2011,69 @@ def build_inner_style_block(
     ])
 
 
+def apply_grid_child_rules(node: Dict, default_rules: Dict) -> None:
+    """
+    Post-process: para cada container con `display: grid` en alguna de sus clases,
+    construye el array `grid-child-rules` mirando los hijos en orden.
+
+    Formato canonico de Oxygen (validado empiricamente contra JSONs reales):
+      [
+        {"child-index": 0, "column-span": "",  "row-span": ""},      # hijo default 1x1
+        {"child-index": 1, "column-span": "3", "row-span": "2"},     # hijo 3 cols x 2 rows
+        ...
+      ]
+    Una entrada por cada hijo (NO truncar al ultimo no-default).
+
+    Los spans se detectan via metadata __grid_span_column__ / __grid_span_row__
+    que `_extract_grid_span_metadata` deposita en default_rules al parsear CSS
+    de la forma `grid-column: span N` o `grid-row: span N`.
+
+    El array se inyecta en `default_rules[container_class]["grid-child-rules"]`
+    para que `build_classes_block` lo emita en su lugar natural.
+    """
+    if not isinstance(node, dict):
+        return
+
+    children = node.get("children") or []
+    if children and node.get("name") == "ct_div_block":
+        opts = node.get("options", {})
+        container_classes = opts.get("classes") or []
+        # Encontrar la primera clase del container que sea display: grid
+        grid_class = None
+        for cls in container_classes:
+            rule = default_rules.get(cls, {})
+            if isinstance(rule, dict) and rule.get("display", "").strip().lower() == "grid":
+                grid_class = cls
+                break
+        if grid_class is not None:
+            rules_array = []
+            for i, child in enumerate(children):
+                child_classes = child.get("options", {}).get("classes") or []
+                col_span = ""
+                row_span = ""
+                # Mergear spans desde todas las clases del hijo (modifier puede vivir
+                # en una clase distinta a la base).
+                for ccls in child_classes:
+                    child_rule = default_rules.get(ccls, {})
+                    if isinstance(child_rule, dict):
+                        if "__grid_span_column__" in child_rule and not col_span:
+                            col_span = child_rule["__grid_span_column__"]
+                        if "__grid_span_row__" in child_rule and not row_span:
+                            row_span = child_rule["__grid_span_row__"]
+                rules_array.append({
+                    "child-index": i,
+                    "column-span": col_span,
+                    "row-span": row_span,
+                })
+            # Solo inyectar si al menos un hijo tiene span no-default (evita ruido
+            # en grids puros 1x1 que no necesitan grid-child-rules).
+            if any(r["column-span"] or r["row-span"] for r in rules_array):
+                default_rules[grid_class]["grid-child-rules"] = rules_array
+
+    for child in children:
+        apply_grid_child_rules(child, default_rules)
+
+
 def _normalize_original_empty_to_array(node: Dict) -> None:
     """
     Recorre el arbol de componentes y reemplaza `options.original = {}` por `[]`.
@@ -2037,6 +2142,11 @@ def main():
 
     # Post-proceso: colapsar wrappers de iconos cuando es seguro
     component_tree = collapse_icon_wrappers(component_tree, default_rules, media_rules)
+
+    # Post-proceso: construir grid-child-rules para containers display:grid cuyos
+    # hijos tienen grid-column/grid-row span N (detectado y guardado como metadata
+    # durante el parseo del CSS).
+    apply_grid_child_rules(component_tree, default_rules)
 
     # Recolectar clases usadas
     class_to_block_type, class_to_tag = collect_used_classes(component_tree)

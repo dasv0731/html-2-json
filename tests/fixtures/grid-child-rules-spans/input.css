@@ -1,0 +1,24 @@
+.gridLayout {
+  text-align: left;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+}
+
+.gridLayout__item--big {
+  grid-column: span 3;
+  grid-row: span 2;
+}
+
+.gridLayout__item--wide {
+  grid-column: span 2;
+}
+
+.gridLayout__item--tall {
+  grid-row: span 2;
+}
+
+.gridLayout__item--unit {
+  grid-column: span 1;
+  grid-row: span 1;
+}

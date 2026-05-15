@@ -4,6 +4,33 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-15 — Fix: gradients van a `custom-css`, no a campo nativo
+
+### Bug encontrado en uso real
+
+Usuario reportó que `<div class="schematic__chevrons">` no renderizaba las rayas amarillas tras pegar el JSON en Oxygen. CSS original:
+
+```css
+.schematic__chevrons {
+  background-color: #1F1A12;
+  background-image: repeating-linear-gradient(75deg, #FFD60A 0, #FFD60A 14px, transparent 14px, transparent 28px);
+}
+```
+
+El skill emitía el `background-image` como propiedad nativa. Oxygen tiene formato propio (`gradient` como objeto estructurado) y no respeta strings CSS de `gradient` en su campo nativo, por lo que el gradient simplemente no se aplicaba al pegar.
+
+### Fix
+
+Agregado al filtro de funciones complejas en `_is_property_native` (transform.py:803-810): `linear-gradient(`, `radial-gradient(`, `conic-gradient(`, `repeating-linear-gradient(`, `repeating-radial-gradient(`, `repeating-conic-gradient(`. Cualquier propiedad con esos valores ahora va a `custom-css` automáticamente, donde sí se renderiza como CSS plano por el frontend.
+
+Fixture nuevo: `gradients-a-custom-css` con 3 clases que tienen los tres tipos de gradient. Suite 19/19.
+
+### Implicación para el usuario
+
+Los gradients siguen funcionando visualmente al pegar (vía `custom-css`), pero pierden la editabilidad desde el panel de Background de Oxygen. Si querés que el gradient sea editable nativo, tenés que reconstruirlo manualmente en Oxygen usando su UI de gradient (que produce el objeto estructurado).
+
+---
+
 ## 2026-05-15 — Soporte de `grid-child-rules` para grids con spans
 
 ### Feature nuevo

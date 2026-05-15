@@ -820,12 +820,20 @@ def convert_properties(props: Dict[str, str], block_type: Optional[str] = None) 
 def _is_property_native(prop: str, val: str) -> bool:
     """
     Decide si una propiedad+valor pueden ir nativos a Oxygen.
-    Retorna False si el valor contiene calc(), clamp(), var(), etc.
+    Retorna False si el valor contiene calc(), clamp(), var(), o cualquier
+    funcion gradient (Oxygen tiene un formato propio de objeto estructurado
+    para gradients y no respeta el string CSS en el campo nativo de
+    background-image).
     """
     if prop not in NATIVE_PROPERTIES:
         return False
     # Valores con funciones complejas: van a custom-css
-    if any(fn in val for fn in ("calc(", "clamp(", "min(", "max(", "var(", "env(")):
+    if any(fn in val for fn in (
+        "calc(", "clamp(", "min(", "max(", "var(", "env(",
+        "linear-gradient(", "radial-gradient(", "conic-gradient(",
+        "repeating-linear-gradient(", "repeating-radial-gradient(",
+        "repeating-conic-gradient(",
+    )):
         return False
     return True
 

@@ -451,7 +451,9 @@ Bugs y limitaciones conocidas vigentes. La lista anterior contenía varios ya re
 
 5. **`<i class="fa-...">` absorbido por wrapper inline**: cuando un FA icon vive como único hijo de un wrapper cuyos hijos son todos inline, el detector de rich text del padre lo absorbe a `oxy_rich_text` en lugar de Ruta B (`ct_code_block` independiente). Funcionalmente equivalente pero pierde editabilidad como bloque. Workaround: el `<i>` debe ser root del HTML o tener al menos un hermano block-level. Documentado en SKILL.md.
 
-6. **`background-image: linear-gradient(...)` y `box-shadow` múltiple**: aparecen como NATIVOS en el output (no en custom-css) porque `_is_property_native` solo filtra funciones `calc/clamp/var/min/max/env`, no `linear-gradient/radial-gradient/conic-gradient`. Si Oxygen no respeta esos valores en su campo nativo, hay que moverlos manualmente a custom-css tras pegar. Pendiente: decisión sobre si tratar gradientes y multi-shadow como funciones complejas.
+6. **`box-shadow` múltiple**: aparece como NATIVO en el output. Si Oxygen no respeta multi-shadow en su campo nativo, hay que moverlo manualmente a custom-css tras pegar. Pendiente confirmar empíricamente.
+
+(Resuelto: gradients en `background-image`. Confirmado empíricamente que Oxygen no aplica gradient strings en su campo nativo; ahora todos los `linear-gradient`, `radial-gradient`, `conic-gradient` y sus variantes `repeating-*` van automáticamente a `custom-css`.)
 
 ## Reglas confirmadas que no requieren acción
 

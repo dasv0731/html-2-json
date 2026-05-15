@@ -1092,10 +1092,18 @@ def _maybe_add_flex_for_icon_text_link(tag: Tag, options: Dict, classes: List[st
                 has_text = True
     if not (has_icon and has_text):
         return
-    # Marcar TODAS las clases del link como necesitadas de auto-flex.
-    # En build_classes_block se aplicara el override real.
-    for cls in classes:
-        _AUTOFLEX_CLASSES_NEEDED[cls] = True
+    # Marcar SOLO la ultima clase del link. Convencion BEM: modifier al final
+    # (ej. "btn btn--whatsapp" -> .btn--whatsapp es la modifier que aplica al
+    # contexto especifico icono+texto, .btn es la base reutilizable que no debe
+    # recibir flex inyectado porque puede usarse en otros <a> sin icono).
+    target = classes[-1]
+    _AUTOFLEX_CLASSES_NEEDED[target] = True
+    if len(classes) > 1:
+        WARN.add(
+            f"<a> con icono+texto tiene multiples clases ({' '.join(classes)}). "
+            f"Auto-flex aplicado solo a la ultima ('.{target}'). "
+            f"Si la clase modifier no es esa, reordena las clases o ajusta a mano."
+        )
 
 
 def _maybe_inject_text_child(tag: Tag, ids: "IdAllocator", parent_ct_id: int, depth: int) -> Optional[Dict]:
@@ -1586,10 +1594,10 @@ def build_classes_block(default_rules: Dict, media_rules: Dict, used_classes: Li
                 states_bp = bp_rules.pop("__states__", None) if "__states__" in bp_rules else None
                 expanded = expand_shorthands(bp_rules)
                 bp_oxygen, bp_css = convert_properties(expanded, block_type)
-                # Si hay propiedades de grid o flex, asegurar display
-                if any(p.startswith("grid-") for p in bp_oxygen) and "display" not in bp_oxygen:
-                    if "display" in default_props or "display" in oxygen_props:
-                        bp_oxygen["display"] = "grid"
+                # Si hay propiedades de flex en el breakpoint, asegurar display: flex
+                # para que el panel UI de Oxygen muestre los controles flex en ese breakpoint.
+                # Para grid NO hacemos lo paralelo: el display: grid de top-level se hereda
+                # en cascada CSS y emitirlo en cada breakpoint genera ruido al editar.
                 if any(p in bp_oxygen for p in ("flex-direction", "flex-wrap", "justify-content")) and "display" not in bp_oxygen:
                     if oxygen_props.get("display") == "flex":
                         bp_oxygen["display"] = "flex"

@@ -45,7 +45,7 @@ ct_link [clases-del-link]
 └── ct_text_block "texto"
 ```
 
-**Auto-flex en links con icono + texto**: cuando se detecta el patrón anterior, el skill añade automáticamente a las clases del link `display: flex`, `flex-direction: row`, `gap: 8` (solo si no estaban en el CSS). Esto resuelve que el icono y el texto aparezcan en columna en lugar de fila. **Limitación conocida**: actualmente el auto-flex se aplica a TODAS las clases del link, no solo a la modifier. Bug pendiente.
+**Auto-flex en links con icono + texto**: cuando se detecta el patrón anterior, el skill añade automáticamente a la **última clase** del link `display: flex`, `flex-direction: row`, `gap: 8` (solo si no estaban en el CSS). Esto resuelve que el icono y el texto aparezcan en columna en lugar de fila. Convención BEM: la última clase es típicamente la modifier (`btn btn--whatsapp` → `.btn--whatsapp`), y aplicar solo ahí evita contaminar la clase base que puede usarse en otros `<a>` sin icono. Si el link tiene más de una clase, se emite un WARN avisando dónde se aplicó el auto-flex para que el usuario verifique o reordene.
 
 **Auto-`icon-size` en `ct_fancy_icon`**: el wrapper div de `ct_fancy_icon` recibe `width`/`height` de la clase, pero el SVG interno NO los respeta — usa `icon-size` (propiedad propia de Oxygen). Cuando una clase con `width` o `height` se aplica a un `ct_fancy_icon`, el skill emite también `icon-size` automáticamente con el valor de `width` (o `height` si solo hay height).
 
@@ -169,8 +169,7 @@ Sé honesto con el usuario sobre estas:
 - **`flex-direction: row-reverse` / `column-reverse`**: se descomponen en `flex-direction` + `flex-reverse: reverse` (propiedad propia de Oxygen).
 - **`display: grid` con posicionamiento por `grid-area` o `grid-column: 2 / 4`**: Oxygen Grid usa un modelo distinto (`grid-child-rules` con `column-span` / `row-span`). El skill traduce span simples; posicionamiento absoluto va al `custom-css` o al Code Block.
 - **`<ul>` y `<li>`**: mapeo semántico con `useCustomTag`. `<ul>/<ol>` → `ct_div_block` con `useCustomTag: true, tag: ul/ol`. `<li>` con texto plano → `ct_text_block[li]`. `<li>` con HTML inline mixto (incluyendo `<a>`, `<em>`, `<strong>`, `<br>`) → `oxy_rich_text[li]` con contenido inline directo (sin `<p>` envolvente). `<li>` con tags estructurales hijos (div, h1-h6, ul anidado) → `ct_div_block[li]`. Validado contra exports reales de Oxygen.
-- **Bug pre-existente en media queries**: en algunos casos un media query puede emitir `display: grid` espurio que no estaba en el CSS original. Bug conocido pendiente.
-- **Bug auto-flex en múltiples clases**: cuando un link tiene varias clases (`btn btn--whatsapp btn--sm`), el auto-flex se aplica a TODAS las clases en lugar de solo a la modifier. Si alguna clase se reutiliza en otro contexto sin icono, recibe flex erróneamente. Workaround: usar clases únicas por componente. Fix del skill pendiente.
+- **Inyección de display en media queries (asimétrica entre flex y grid)**: cuando un breakpoint tiene `flex-direction`/`flex-wrap`/`justify-content` y la clase top-level es `display: flex`, el skill inyecta `display: flex` en ese breakpoint para que el panel UI de Oxygen muestre los controles flex. Para grid NO se hace lo paralelo: el `display: grid` de top-level se hereda en cascada CSS y emitirlo en cada breakpoint generaba ruido al editar (era el "bug del display:grid espurio"). Si necesitas display:grid explícito en un breakpoint, escribilo en tu CSS.
 - **`<button>` HTML: mapeo por trío según contenido** (paralelo a `<li>`):
   - `<button>Texto plano</button>` → `ct_text_block` con `useCustomTag: true, tag: "button"`.
   - `<button>Texto <em>inline mixto</em></button>` → `oxy_rich_text` con `useCustomTag: true, tag: "button"`.

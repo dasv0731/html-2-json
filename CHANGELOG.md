@@ -4,6 +4,28 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-15 — Reorg de filesystem + suite de tests + fix de 2 bugs documentados
+
+### Reorganización del repo
+
+- `transform.py` movido a `scripts/transform.py` y los tres `.md` de referencia movidos a `references/` (estaban aplanados en la raíz; SKILL.md y README ya documentaban estos paths, el comando `python scripts/transform.py …` no funcionaba antes).
+
+### Suite de tests
+
+Nueva: `tests/run.py` + `tests/fixtures/<caso>/` con `input.html`, `input.css`, `options.json`, `expected.json`. Comparación byte-a-byte, diff JSON pretty-printed al fallar, flag `--update` para regenerar baselines. Sin frameworks (stdlib pura).
+
+Casos baseline: `card-basico`, `link-icono-texto`, `boton-text-customtag`, `lista-ul-li`, `pseudo-hover-focus`.
+
+### Bugs arreglados con TDD
+
+**Bug auto-flex multi-clase**: cuando un `<a>` con icono+texto tenía varias clases (ej. `btn btn--whatsapp`), el skill aplicaba el auto-flex inyectado (`display:flex`, `flex-direction:row`, `gap:8`) a TODAS las clases. Si la clase base (`.btn`) se reutilizaba en otros links sin icono, recibía flex sin motivo. Ahora se aplica solo a la **última** clase (convención BEM: modifier al final), y se emite WARN cuando hay más de una clase. Fix en `_maybe_add_flex_for_icon_text_link` (transform.py:1097-1108). Fixture que reproducía el bug: `bug-autoflex-multiclase`.
+
+**Bug display:grid espurio en media queries**: cuando una clase tenía `display: grid` en top-level y un media query solo cambiaba alguna prop grid (ej. `grid-row-gap: 12px`), el skill inyectaba `display: grid` en el breakpoint aunque el usuario no lo escribió. Ruido al editar en Oxygen. El comportamiento paralelo para flex sí tiene motivación (el panel UI de Oxygen muestra los controles flex en el breakpoint), pero para grid el display se hereda en cascada y no aporta valor. Fix: eliminadas las 3 líneas que inyectaban display:grid (transform.py:1590-1592 ex). Fixture que reproducía el bug: `bug-grid-display-espurio`.
+
+Ambos fixtures se commitearon primero en estado failing y luego pasaron tras el fix — TDD real. Estado final de la suite: 7/7.
+
+---
+
 ## 2026-05-15 — Sesión de fixes y validaciones empíricas
 
 **Backup**: `.backup-20260515-145200/`

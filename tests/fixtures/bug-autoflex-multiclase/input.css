@@ -1,0 +1,15 @@
+.bar {
+  display: flex;
+  gap: 12px;
+}
+
+.btn {
+  padding: 10px 16px;
+  color: #ffffff;
+  border-radius: 6px;
+  text-decoration: none;
+}
+
+.btn--whatsapp {
+  background-color: #25d366;
+}

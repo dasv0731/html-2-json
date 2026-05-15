@@ -4,6 +4,40 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-15 — Descubrimientos colaterales: blockquote, classes FA, absorción inline
+
+Continuación de la sesión de tests. Tres descubrimientos surgidos al revisar baselines de la suite expandida; dos arreglados con TDD, uno documentado como comportamiento esperado.
+
+### Bug `<blockquote>` sin `useCustomTag`
+
+`<blockquote>` caía al fallback de "tag desconocido" en `_resolve_block_type` y se mapeaba a `ct_div_block` con `original: {}` (sin tag). El componente renderizaba un `<div>`, perdiendo la semántica HTML. Análogo a `<section>`, `<article>`, etc. que ya tienen branch propio.
+
+Fix: agregada `"blockquote"` a la tupla de tags semánticos en `_resolve_block_type` (transform.py:1422). Ahora emite `original.tag: "blockquote"` igual que los otros tags semánticos. Atributos no manejados (`cite`) siguen viajando como `custom-attributes`.
+
+Fixture: `bug-blockquote-sin-tag`.
+
+### Bug classes FA duplicadas en `ct_code_block` Ruta B
+
+Cuando un `<i class="fa-solid fa-envelope iconStack__icon">` se mapeaba a `ct_code_block` por Ruta B, las clases FA (`fa-solid`, `fa-envelope`) viajaban DOS veces:
+1. Dentro del `original.code-php` literal (necesario).
+2. En `options.classes` del bloque y en `classes` top-level con `original: {}` (redundante, ensucia la tabla global de selectores de Oxygen con `.fa-solid`, `.fa-envelope`, etc.).
+
+Fix: cuando el bloque es `ct_code_block` con `code-php` (Rutas B/C), las clases que matchean el patrón FA o empiezan con `fa-` se filtran de `options.classes`. Las clases del usuario (no-FA) se preservan tal cual para que el panel "Manage > Selectors" siga ofreciéndolas. transform.py:1011-1015.
+
+Fixture: `icono-fa6-codeblock` (actualizado con expected sin FA classes).
+
+### Comportamiento documentado: absorción inline de `<i class="fa-...">` dentro de wrappers
+
+Cuando `<i class="fa-...">` vive como único hijo (o junto a otros inline) de un `<div>` u otro tag, el detector de rich text del padre lo absorbe en un `oxy_rich_text` con HTML literal en `ct_content`. NO llega a la Ruta B. Funcionalmente se renderiza igual (las clases FA disparan los glifos vía la stylesheet de FontAwesome), pero pierde editabilidad como bloque independiente.
+
+No es bug — es consecuencia consistente del detector de rich text que ya cubría `<em>`, `<span>`, etc. Pero SKILL.md describía Ruta B sin esa condición. Doc actualizada en SKILL.md sección "Iconos" con "Aclaración sobre cuándo aplica la Ruta B". Fixture descriptivo: `icono-fa6-absorbido-richtext` (NO failing — congela el comportamiento como baseline).
+
+### Estado de la suite
+
+16 fixtures, 16/16 pasan.
+
+---
+
 ## 2026-05-15 — Reorg de filesystem + suite de tests + fix de 2 bugs documentados
 
 ### Reorganización del repo

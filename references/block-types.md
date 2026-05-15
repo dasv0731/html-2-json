@@ -8,7 +8,7 @@ Tabla de mapeo HTML tag → tipo de bloque interno, con las propiedades específ
 |---|---|---|---|---|
 | `<div>` | `ct_div_block` | `[]` (vacío) | No | Default, sin tag custom |
 | `<section>` | `ct_div_block` | `{"tag":"section"}` | No | Cualquier Div con tag custom |
-| `<article>`, `<header>`, `<footer>`, `<aside>`, `<nav>`, `<main>` | `ct_div_block` | `{"tag":"<tag>"}` | No | Mismo patrón que section |
+| `<article>`, `<header>`, `<footer>`, `<aside>`, `<nav>`, `<main>`, `<blockquote>` | `ct_div_block` | `{"tag":"<tag>"}` | No | Mismo patrón que section |
 | `<h1>`–`<h6>` | `ct_headline` | `{"tag":"hN"}` para N≠1; `[]` para h1 (h1 es default) | Sí | El texto va en `ct_content` |
 | `<p>` | `ct_text_block` | `[]` (vacío, p es default) | Sí | El texto va en `ct_content` |
 | `<span>` | `ct_text_block` | `{"useCustomTag":"true","tag":"span"}` | Sí | `useCustomTag` obligatorio para tags ≠ p |

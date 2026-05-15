@@ -1006,6 +1006,13 @@ def _build_component(tag: Tag, ids: IdAllocator, parent_ct_id: int, depth: int) 
 
     # classes
     classes = tag.get("class", [])
+    # Si el bloque es ct_code_block con HTML literal que ya contiene las clases
+    # (Ruta B de iconos FA), filtrar las clases FA del bloque. Ya viajan dentro
+    # del code-php y emitirlas tambien como classes del bloque ensucia la tabla
+    # global de selectores de Oxygen con .fa-solid, .fa-envelope, etc. (clases
+    # de framework, no de usuario, que el usuario no quiere estilizar).
+    if is_codeblock_with_html_literal and classes:
+        classes = [c for c in classes if not _FA_CLASS_PATTERN.match(c) and not c.startswith("fa-")]
     if classes:
         options["classes"] = list(classes)
         options["activeselector"] = classes[-1]
@@ -1419,7 +1426,7 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
         return ("ct_image", original)
 
     # Tags de tipo div con tag custom
-    if name in ("section", "article", "header", "footer", "aside", "nav", "main"):
+    if name in ("section", "article", "header", "footer", "aside", "nav", "main", "blockquote"):
         return ("ct_div_block", {"tag": name})
 
     # h1-h6

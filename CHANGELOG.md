@@ -4,6 +4,22 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-15 — Spans vacíos decorativos → `ct_div_block` con `useCustomTag`
+
+### Bug encontrado en uso real
+
+Usuario reportó que un `<span class="heroBlog__dot" aria-hidden="true"></span>` (separador visual decorativo, sin texto) se mapeaba a `ct_text_block` con `useCustomTag: span`. Esto hacía que en el panel de Oxygen apareciera con un campo "Text Content" editable, confuso para algo puramente visual.
+
+### Fix
+
+Cuando `<span>`, `<em>`, `<strong>`, o `<small>` está **vacío** (sin texto ni hijos Tag), ahora se mapea a `ct_div_block` con `useCustomTag: true, tag: <el-tag>`. Si tiene contenido, sigue siendo `ct_text_block` como antes.
+
+Resultado: el bloque sigue renderizando con el tag HTML correcto (`<span>`), pero el panel de Oxygen lo trata como contenedor en vez de bloque de texto. Sin campo "Text Content" innecesario.
+
+Fixture: `span-vacio-decorativo` con 3 spans/em (2 vacíos + 1 con texto). Suite 20/20.
+
+---
+
 ## 2026-05-15 — Auto-emisión de `grid-column-min-width-unit: auto` en grid containers
 
 ### Bug descubierto en uso real

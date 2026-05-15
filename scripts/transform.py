@@ -1497,6 +1497,14 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
 
     # span y otros tags inline
     if name in ("span", "em", "strong", "small"):
+        # Si el tag esta vacio (sin texto ni hijos), tratarlo como div decorativo
+        # con useCustomTag. Asi el panel de Oxygen no muestra "Text Content"
+        # editable para algo que no es texto (ej. <span class="dot" aria-hidden></span>
+        # usado como punto decorativo o separador visual).
+        has_text = bool(tag.get_text(strip=True))
+        has_tag_children = any(isinstance(c, Tag) for c in tag.children)
+        if not has_text and not has_tag_children:
+            return ("ct_div_block", {"useCustomTag": "true", "tag": name})
         return ("ct_text_block", {"useCustomTag": "true", "tag": name})
 
     # ul / ol -> ct_div_block con useCustomTag

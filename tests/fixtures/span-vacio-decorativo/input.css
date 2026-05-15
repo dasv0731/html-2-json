@@ -1,0 +1,25 @@
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.meta__dot {
+  width: 6px;
+  height: 6px;
+  background-color: #E30613;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.meta__label {
+  font-size: 14px;
+  color: #1F1A12;
+}
+
+.meta__sep {
+  width: 1px;
+  height: 12px;
+  background-color: #999999;
+  display: inline-block;
+}

@@ -1,0 +1,14 @@
+.features__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.features__item {
+  color: #333333;
+  font-size: 16px;
+  line-height: 1.5;
+}

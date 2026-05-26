@@ -13,6 +13,7 @@ Ver SKILL.md y references/ para el detalle de las reglas.
 """
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -71,7 +72,9 @@ TAG_TO_BLOCK_TYPE = {
     # <a> y <button> tienen logica especial mas abajo
 }
 
-# Tipo Oxygen -> base del selector
+# Tipo Oxygen -> base del selector.
+# Formato: name.slice(3) en Angular (controller.tree.js:727).
+# Para tags con 'oxy_' o 'oxy-' la slice da '_rich_text' o '-shape-divider'.
 SELECTOR_BASE = {
     "ct_div_block": "div_block",
     "ct_headline": "headline",
@@ -84,6 +87,11 @@ SELECTOR_BASE = {
     "ct_fancy_icon": "fancy_icon",
     "ct_code_block": "code_block",
     "oxy_rich_text": "_rich_text",
+    "oxy-shape-divider": "-shape-divider",
+    "ct_new_columns": "new_columns",
+    "ct_video": "video",
+    "oxy_map": "_map",
+    "oxy_progress_bar": "_progress_bar",
 }
 
 # Tipo Oxygen -> nicename base
@@ -99,6 +107,11 @@ NICENAME_BASE = {
     "ct_fancy_icon": "Icon",
     "ct_code_block": "Code Block",
     "oxy_rich_text": "Rich Text",
+    "oxy-shape-divider": "Shape Divider",
+    "ct_new_columns": "Columns",
+    "ct_video": "Video",
+    "oxy_map": "Map",
+    "oxy_progress_bar": "Progress Bar",
 }
 
 # Propiedades CSS soportadas nativamente por Oxygen (panel editable).
@@ -203,6 +216,92 @@ COLOR_PROPERTIES = {
     "icon-color", "icon-background-color",
     "fill", "stroke",
 }
+
+
+# Clases internas que Oxygen inyecta en el HTML al renderizar sus componentes.
+# Si el user pega HTML rendered de un site Oxygen, estas clases aparecen pero
+# no deben emitirse al `classes:` array ni al CSS - Oxygen las re-inyecta al
+# renderizar el bloque correspondiente. Catalogadas de oxygen.css del plugin.
+_OXYGEN_INTERNAL_CLASSES = frozenset({
+    # Section
+    "ct-section-inner-wrap", "ct-section-with-shape-divider",
+    # Columns (legacy)
+    "ct-columns-inner-wrap", "ct-column",
+    # Video
+    "ct-video", "oxygen-vsb-responsive-video-wrapper",
+    "oxygen-vsb-responsive-video-wrapper-custom",
+    # Section video bg
+    "oxy-video-container", "oxy-video-background", "oxy-video-overlay",
+    # Header builder
+    "oxy-header-wrapper", "oxy-header-row", "oxy-header-container",
+    "oxy-header-left", "oxy-header-center", "oxy-header-right",
+    "oxy-sticky-header-fade-in", "oxy-overlay-header",
+    # Nav menu / Pro menu / Site Nav
+    "oxy-nav-menu-list", "oxy-menu-toggle",
+    # Social icons / soundcloud
+    "oxy-social-icons", "oxy-soundcloud",
+    # Icon box
+    "oxy-icon-box", "oxy-icon-box-icon", "oxy-icon-box-content",
+    "oxy-icon-box-text", "oxy-icon-box-heading",
+    # Progress bar
+    "oxy-progress-bar", "oxy-progress-bar-background",
+    "oxy-progress-bar-progress-wrap", "oxy-progress-bar-progress",
+    "oxy-progress-bar-overlay-text", "oxy-progress-bar-overlay-percent",
+    # Tabs
+    "oxy-tabs", "oxy-tabs-wrapper", "oxy-tab", "oxy-tab-content",
+    "oxy-tabs-contents-content-hidden", "oxy-tabs-contents",
+    # Superbox / Testimonial / Toggle
+    "oxy-superbox", "oxy-superbox-wrap", "oxy-superbox-primary",
+    "oxy-superbox-secondary", "oxy-testimonial", "oxy-toggle",
+    # Gallery
+    "oxy-gallery", "oxy-gallery-item", "oxy-gallery-item-sizer",
+    "oxy-gallery-item-contents", "oxy-gallery-flex", "oxy-gallery-masonry",
+    "oxy-gallery-grid",
+    # Rendered ct-* classes (Oxygen las agrega al class= junto a las del user;
+    # NO debemos re-emitirlas como clases propias del bloque)
+    "ct-div-block", "ct-text-block", "ct-headline", "ct-image",
+    "ct-code-block", "ct-fancy-icon", "ct-link", "ct-link-button",
+    "ct-link-text", "ct-new-columns", "ct-span",
+})
+
+# Prefijos de clases internas (cualquier clase que arranque con esto se omite).
+_OXYGEN_INTERNAL_CLASS_PREFIXES = (
+    "oxy-nav-menu-hamburger-",
+    "oxy-pricing-box",
+    "oxy-pro-menu",
+)
+
+# Clases marker que el skill usa como opt-in para emitir bloques especificos
+# (ct_section, ct_new_columns, ct_link_button, ct_code_block unwrap). Son
+# semaforos para el skill, no estilan nada. Filtrarlas del classes: del output.
+_SKILL_OPTIN_CLASSES = frozenset({
+    "is-oxy-section",
+    "is-oxy-columns",
+    "is-oxy-button",
+    "is-oxy-unwrap",
+    "is-oxy-progress-bar",
+})
+
+
+def _filter_user_classes(classes: list) -> list:
+    """Filtra del array de clases del user:
+      - las que son internas de Oxygen (inyectadas por el render de bloques);
+      - las marker is-oxy-* que el skill usa como opt-in (semaforos, no estilan).
+    Preserva orden y duplicados de las clases legitimas del user."""
+    if not classes:
+        return []
+    out = []
+    for c in classes:
+        if not isinstance(c, str):
+            continue
+        if c in _OXYGEN_INTERNAL_CLASSES:
+            continue
+        if c in _SKILL_OPTIN_CLASSES:
+            continue
+        if any(c.startswith(p) for p in _OXYGEN_INTERNAL_CLASS_PREFIXES):
+            continue
+        out.append(c)
+    return out
 
 
 # ============================================================
@@ -1529,7 +1628,11 @@ def _build_component(tag: Tag, ids: IdAllocator, parent_ct_id: int, depth: int) 
         and isinstance(original, dict)
         and "code-php" in original
     )
-    if not is_codeblock_with_html_literal:
+    # oxy-shape-divider y oxy_progress_bar renderizan su propia estructura
+    # interna; los atributos del HTML original (data-percent, etc.) o ya se
+    # consumieron como options o no aplican al render.
+    is_oxy_self_rendered = block_type in ("oxy-shape-divider", "oxy_progress_bar")
+    if not is_codeblock_with_html_literal and not is_oxy_self_rendered:
         # Mapear data-aos-* del HTML a las keys aos-* nativas de Oxygen.
         # El user las edita desde el panel "Effects > Animation on Scroll".
         aos_opts = _extract_aos_options(tag)
@@ -1590,7 +1693,12 @@ def _build_component(tag: Tag, ids: IdAllocator, parent_ct_id: int, depth: int) 
             options["ct_content"] = rich_html
 
     # classes
-    classes = tag.get("class", [])
+    # v3.4: filtrar clases internas inyectadas por Oxygen (ct-section-inner-wrap,
+    # ct-fancy-icon, oxy-progress-bar-*, etc.) que aparecen cuando el user pega
+    # HTML rendered de un site Oxygen. Si las dejamos pasan al `classes` array y
+    # quedan duplicadas cuando Oxygen las re-inyecta al renderizar el bloque.
+    raw_classes = tag.get("class", []) or []
+    classes = _filter_user_classes(raw_classes)
     if classes:
         options["classes"] = list(classes)
         options["activeselector"] = classes[-1]
@@ -1604,7 +1712,7 @@ def _build_component(tag: Tag, ids: IdAllocator, parent_ct_id: int, depth: int) 
     component["depth"] = depth
 
     # Hijos: solo para tipos contenedores
-    if block_type in ("ct_div_block", "ct_link"):
+    if block_type in ("ct_div_block", "ct_link", "ct_section", "ct_new_columns"):
         children: List[Dict] = []
         # Caso especial: div con SOLO contenido inline (texto plano o texto+tags inline).
         # Inyectar un ct_text_block o oxy_rich_text que capture ese contenido.
@@ -1768,6 +1876,103 @@ def _maybe_inject_text_child(tag: Tag, ids: "IdAllocator", parent_ct_id: int, de
     ])
 
 
+def _parse_google_maps_iframe(src: str) -> Dict[str, str]:
+    """Parsea el src de un iframe de Google Maps Embed v1 y devuelve los options
+    de oxy_map. Formato esperado:
+      https://www.google.com/maps/embed/v1/place?key=KEY&q=ADDRESS&zoom=N
+    Falla silenciosa: si no hay match, devuelve dict vacio. El user puede llenar
+    los campos desde el panel."""
+    from urllib.parse import urlparse, parse_qs, unquote_plus
+    out: Dict[str, str] = OrderedDict()
+    try:
+        parsed = urlparse(src)
+        qs = parse_qs(parsed.query)
+    except Exception:
+        return out
+    if "q" in qs and qs["q"]:
+        out["map_address"] = unquote_plus(qs["q"][0])
+    if "zoom" in qs and qs["zoom"]:
+        out["map_zoom"] = qs["zoom"][0]
+    # height/width del iframe se podrian capturar, pero quedan en custom-attributes
+    # via flow normal.
+    return out
+
+
+# ============================================================
+# CATALOGO DE SHAPE-DIVIDERS BUILT-IN DE OXYGEN
+# ============================================================
+
+# Hashes md5 del atributo `d` del primer <path> de cada shape-divider built-in
+# de Oxygen Builder 4.x (extraido de components/classes/shape-divider.class.php).
+# Permite detectar SVGs que matcheen exactamente y emitirlos como oxy-shape-divider
+# nativo en lugar de SVG inline en code_block. Si el path normalizado matchea,
+# se emite el bloque oxy-* y queda editable desde el panel "Shape Divider".
+# Tres shapes built-in (Shark 1/2/3) usan estructuras sin <path>, no se detectan
+# y caen a Ruta C (code_block con SVG inline) como antes.
+_OXY_SHAPE_DIVIDER_HASHES = {
+    'a7fb3946f59925015486f749ec01b041': 'Angle 1',
+    '2497d26957518b02d8df5227017f2898': 'Angle 2',
+    '4cf223f28a49fcac005b0cb250609612': 'Angle 3',
+    'f36ff2b01f059ca715d659a5350a7876': 'Balance 1',
+    'b05ded68f281ce46042d03752567cd6a': 'Balance 2',
+    '119cf2d18cdff4bfacbcd3f04ef9ef90': 'Balance 3',
+    '2d5344accb67c3763ff047b8f6fb8864': 'Cave 1',
+    '444faddb7c9cf0b9c7e18ec6b9e26ac7': 'Cave 2',
+    '758e94c979b695a4f9db4a8f75ed8836': 'Cave 3',
+    '183cd44c3221fdd090acd2c8a047607b': 'Curvy 1',
+    'd3308d8e0f52137a6d6aa684d4cd20ae': 'Curvy 2',
+    'a3608d80d448d86d77ca82030e790c56': 'Curvy 3',
+    'bd39130b5aa00848f1f79403df6f18f6': 'Diamond 1',
+    'ab8e98d90a9b4404bb5a2887e662ab2b': 'Diamond 2',
+    'bc6f0dba0ebe44eeef58ba92da93b504': 'Diamond 3',
+    '05041b410642fea3b1c58e2f9f4276d7': 'Logs 1',
+    'b96f55caa8cee733cfa5d480faf24a35': 'Logs 2',
+    '51d9fd903ff1d3c3d9f041f23fb4348a': 'Logs 3',
+    '455689050f51bfe32b4d07c8fa1c4645': 'Ocean 1',
+    '0e96637245493c1dcc56c31de8a3b692': 'Ocean 2',
+    '4eabdecc94f0478519be10b6d0de5dc5': 'Ocean 3',
+    '76de472d233e13278af69c8221581aef': 'Towers 1',
+    '041e397d0d2228ed574e1dd099ae868f': 'Towers 2',
+    '8c17615b02044c98c63876c215378110': 'Towers 3',
+    'a8756cc76d44f032d08b16e2bcc8de48': 'Valley 1',
+    '49107d30647e76f7d74150e9f591b06b': 'Valley 2',
+    '4f9aa1c466d13643de1459e9057b1cec': 'Valley 3',
+    'bc2feb12ee42ca6ded69ae3575292936': 'Wavy 1',
+    '797ee925cd3bdc033de1100e5fb5d62a': 'Wavy 2',
+    '9cbcfcfc28e02464cb7c6b15a930a3a4': 'Wavy 3',
+}
+
+
+def _detect_shape_divider(svg_tag: Tag) -> Optional[str]:
+    """Si el <svg> matchea EXACTAMENTE un shape-divider built-in de Oxygen,
+    retorna su nombre canonico (ej. 'Wavy 1'). Retorna None si no matchea.
+
+    Matching:
+    - El <svg> debe tener viewBox="0 0 1440 320" (canonical Oxygen).
+    - Debe tener al menos un <path d="...">.
+    - El primer path normalizado (whitespace collapsed) debe matchear el hash md5
+      de algun shape del catalogo built-in.
+
+    Falsos positivos: cero (md5 de path completo). Falsos negativos: posibles si
+    el SVG fue re-serializado con cambios sutiles (separadores, decimales). En
+    caso de no-match cae a Ruta C (code_block) como antes.
+    """
+    if svg_tag.name.lower() != "svg":
+        return None
+    viewbox = svg_tag.get("viewBox") or svg_tag.get("viewbox") or ""
+    if str(viewbox).strip() != "0 0 1440 320":
+        return None
+    path_tag = svg_tag.find("path")
+    if path_tag is None:
+        return None
+    d = path_tag.get("d", "")
+    if not d:
+        return None
+    d_norm = re.sub(r"\s+", " ", str(d)).strip()
+    digest = hashlib.md5(d_norm.encode("utf-8")).hexdigest()
+    return _OXY_SHAPE_DIVIDER_HASHES.get(digest)
+
+
 # ============================================================
 # DETECCION DE ICONOS (Rutas A, B, C)
 # ============================================================
@@ -1905,11 +2110,33 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
     """
     name = tag.name.lower()
 
+    # v3.4: opt-in `is-oxy-unwrap` -> ct_code_block con unwrap:true y HTML
+    # literal del tag en code-php. Util cuando el user quiere preservar markup
+    # arbitrario (scripts, web components, custom widgets) sin que Oxygen agregue
+    # un wrapper externo. La clase se filtra del classes: array por _SKILL_OPTIN_CLASSES.
+    classes_for_optin = tag.get("class", []) or []
+    if any(str(c).lower() == "is-oxy-unwrap" for c in classes_for_optin):
+        return ("ct_code_block", {"code-php": str(tag), "unwrap": "true"})
+
     # Ruta A: <svg><use xlink:href="#XXX"></use></svg> -> ct_fancy_icon
     if name == "svg":
         icon_id = _detect_fancy_icon_use(tag)
         if icon_id is not None:
             return ("ct_fancy_icon", {"icon-id": icon_id})
+        # v3.3: detectar shape-divider built-in (Wavy, Angle, Cave, etc.)
+        # antes de caer a Ruta C. Si matchea el catalogo, lo emite como
+        # oxy-shape-divider nativo (editable desde el panel).
+        # Las options de Elements API (oxy-*) van prefijadas con el tag.
+        shape_name = _detect_shape_divider(tag)
+        if shape_name is not None:
+            WARN.add(
+                f"SVG detectado como shape-divider built-in '{shape_name}', "
+                "emitido como oxy-shape-divider nativo. Debe vivir dentro de un "
+                "ct_section para que Oxygen agregue la clase ct-section-with-shape-divider."
+            )
+            return ("oxy-shape-divider", {
+                "oxy-shape-divider_svg_shape": shape_name,
+            })
         # Ruta C: SVG inline crudo -> ct_code_block
         svg_str = _serialize_svg_for_codeblock(tag)
         WARN.add(
@@ -2013,6 +2240,15 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
 
     # Tags de tipo div con tag custom
     if name in ("section", "article", "header", "footer", "aside", "nav", "main"):
+        # v3.3: <section class="is-oxy-section"> -> ct_section nativo.
+        # Habilita section-width, container-padding-*, video_background del
+        # panel nativo de Oxygen. Sin la clase opt-in, sigue siendo ct_div_block
+        # con tag=section (default seguro). Oxygen envuelve los children en
+        # .ct-section-inner-wrap automaticamente al renderizar.
+        if name == "section":
+            classes = tag.get("class", []) or []
+            if any(c.lower() == "is-oxy-section" for c in classes):
+                return ("ct_section", {})
         return ("ct_div_block", {"tag": name})
 
     # h1-h6
@@ -2066,7 +2302,50 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
 
     # div (default)
     if name == "div":
+        classes = tag.get("class", []) or []
+        classes_lower = [str(c).lower() for c in classes]
+        # v3.3: <div class="is-oxy-columns"> -> ct_new_columns nativo.
+        if "is-oxy-columns" in classes_lower:
+            return ("ct_new_columns", {})
+        # v3.4: <div class="is-oxy-progress-bar" data-percent="50"> -> oxy_progress_bar.
+        # Estructura HTML interna se descarta - Oxygen la regenera. El user
+        # configura textos left/right desde el panel.
+        if "is-oxy-progress-bar" in classes_lower:
+            orig: Dict[str, Any] = OrderedDict()
+            percent = tag.get("data-percent", "")
+            if percent:
+                orig["progress_percent"] = str(percent)
+            return ("oxy_progress_bar", orig)
         return ("ct_div_block", {})
+
+    # ============================================================
+    # v3.4: <iframe> -> ct_video (YouTube/Vimeo) | oxy_map (Google Maps) | fallback code_block
+    # ============================================================
+    if name == "iframe":
+        src = tag.get("src", "") or ""
+        src_lower = src.lower()
+        # YouTube/Vimeo -> ct_video
+        if any(d in src_lower for d in ("youtube.com", "youtu.be", "vimeo.com", "player.vimeo.com")):
+            original: Dict[str, Any] = OrderedDict()
+            original["src"] = src
+            original["embed_src"] = src
+            # Aspect ratio: default 16:9. Si el iframe tiene width/height numericos,
+            # podriamos calcularlo, pero seria sobre-ingenieria. 56.25% cubre el caso
+            # mas comun y el user puede cambiarlo desde el panel.
+            original["video-padding-bottom"] = "56.25%"
+            original["use-custom"] = "0"
+            return ("ct_video", original)
+        # Google Maps -> oxy_map
+        if "google.com/maps/embed" in src_lower:
+            return ("oxy_map", _parse_google_maps_iframe(src))
+        # Otros iframes (formularios embebidos, twitter, etc.) -> code_block con HTML literal.
+        # Pierde editabilidad pero conserva render. WARN al user.
+        WARN.add(
+            f"<iframe src=\"{src[:80]}{'...' if len(src) > 80 else ''}\"> emitido como ct_code_block. "
+            "Si es video o mapa, vuelve a pegar usando un patron reconocible "
+            "(URL de YouTube/Vimeo o Google Maps embed)."
+        )
+        return ("ct_code_block", {"code-php": str(tag), "unwrap": "true"})
 
     # ============================================================
     # v3.2: tags HTML adicionales mapeados con useCustomTag

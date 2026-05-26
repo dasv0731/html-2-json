@@ -15,6 +15,10 @@ Transforma un par HTML + CSS en el JSON que se pega en un bloque reusable de Oxy
 
 **v3.2** (cobertura extendida, 2026-05-26): `filter` parseado a `filter-amount-*` broken-out (editable), `transform` como array de transform-step objects, `data-aos-*` del HTML mapeado a keys `aos-*` nativas, mapeo completo de tablas (`<table>/<thead>/<tbody>/<tr>/<td>/<th>`), forms (`<form>/<input>/<label>/<select>/<textarea>/<button>/<fieldset>/<legend>`), void elements (`<hr>/<input>/<col>/<br>`) y otros block-level (`<blockquote>/<pre>/<code>/<figcaption>/<summary>`). `style="..."` inline soportado (antes rechazado). Comentarios HTML ya no generan `ct_text_block` ruido.
 
+**v3.3** (bloques nativos avanzados, 2026-05-26): detección automática de `oxy-shape-divider` para SVGs que matcheen el catálogo built-in de Oxygen (30 shapes vía hash md5 del path); `ct_section` nativo via opt-in `is-oxy-section` (habilita `section-width`, `container-padding-*`, `video_background`); `ct_new_columns` nativo via opt-in `is-oxy-columns` (habilita `stack-columns-vertically`, `reverse-column-order`, etc.).
+
+**v3.4** (multimedia + filtro de clases internas, 2026-05-26): `ct_video` auto-detect desde iframe YouTube/Vimeo; `oxy_map` auto-detect desde iframe Google Maps Embed (parsea `q=` y `zoom=`); `oxy_progress_bar` opt-in via `is-oxy-progress-bar` (con `data-percent`); `ct_code_block` con `unwrap:true` opt-in via `is-oxy-unwrap` (preserva markup arbitrario sin wrapper); filtro automático de clases internas de Oxygen (`ct-div-block`, `ct-section-inner-wrap`, `oxy-progress-bar-*`, `ct-fancy-icon`, etc.) que aparecen cuando user pega HTML rendered de un site Oxygen.
+
 ## Cuándo usar este skill
 
 El usuario quiere convertir HTML/CSS a JSON de Oxygen para pegar en un bloque reusable. Señales típicas:
@@ -318,6 +322,66 @@ Segunda iteración del mismo día. Ataca los pendientes deliberados de v3.1.
 ### Bug pre-existente arreglado
 
 19. **Comentarios HTML (`<!-- ... -->`) generaban `ct_text_block` ruido**: BeautifulSoup expone `Comment` como subclase de `NavigableString`. Fix: importar `Comment` y `continue` cuando aparece como hijo, tanto en `_build_component` como en `_maybe_inject_text_child`.
+
+## v3.3 — bloques nativos avanzados (2026-05-26)
+
+Tercera iteración del día. Suma tres bloques nativos avanzados desbloqueados por una segunda auditoría del código de Oxygen.
+
+### Nuevos bloques nativos
+
+20. **`oxy-shape-divider` con detección automática**: cualquier `<svg viewBox="0 0 1440 320">` cuyo primer `<path d="...">` matchee exactamente el catálogo built-in de Oxygen (30 shapes: Wavy, Angle, Cave, Curvy, Diamond, Ocean, Logs, Towers, Valley, Balance — variantes 1/2/3 de cada uno) se emite como `oxy-shape-divider` nativo con `oxy-shape-divider_svg_shape: "<nombre>"`. Matching por hash md5 del path normalizado: cero falsos positivos. SVGs que no matchean caen a Ruta C (code_block) como antes. Los atributos del `<svg>` original NO se emiten como `custom-attributes`. WARN avisa que debe vivir dentro de un `ct_section`.
+
+21. **`ct_section` nativo via opt-in `<section class="is-oxy-section">`**: habilita las propiedades únicas de section (section-width, container-padding-*, video_background) del panel nativo. Sin la clase, sigue como `ct_div_block` con `tag: section` (default seguro). Oxygen agrega `.ct-section-inner-wrap` automáticamente al renderizar.
+
+22. **`ct_new_columns` nativo via opt-in `<div class="is-oxy-columns">`**: habilita stacking responsive nativo (stack-columns-vertically, reverse-column-order, set-columns-width-50). Reemplaza media queries manuales por una opción editable desde el panel. Default `stack-columns-vertically: tablet`.
+
+### Lo que NO se implementó de la segunda auditoría
+
+- **Stylesheets** (option global, inapropiado para JSON pegable).
+- **Omitir defaults Oxygen** (optimización marginal con riesgo si los defaults cambian).
+- **`%%ELEMENT_ID%%` en custom-css** (solo funciona en oxy-*, no en ct_* que es lo que mayormente emitimos).
+- **`color(N)` / `["global", key]`** (IDs/keys dependen del site destino, no portables).
+- **`[oxygen ...]` dynamic shortcodes** (requieren firma HMAC del site).
+- **`ct_reusable`** (requiere post `ct_template` pre-creado en DB).
+- **Base64-encode `content` de pseudo-states / `normalize_custom_css`**: verificado, solo aplica al save→DB, no al paste flow. El skill ya emite plano correctamente.
+
+## v3.4 — componentes multimedia + filtro de clases internas (2026-05-26)
+
+Cuarta iteración del día. Suma componentes multimedia y limpia el ruido cuando se pega HTML rendered de un site Oxygen.
+
+### Nuevos bloques
+
+23. **`ct_video` auto-detectado desde iframe YouTube/Vimeo**: `<iframe src="https://youtube.com|youtu.be|vimeo.com|player.vimeo.com/...">` se emite como `ct_video` con `src`, `embed_src`, `video-padding-bottom: "56.25%"` (16:9 default), `use-custom: "0"`. Aspect ratio se puede editar desde el panel. iframes que no matchean (formularios, twitter, etc.) caen a `ct_code_block` con HTML literal y WARN.
+
+24. **`oxy_map` auto-detectado desde iframe Google Maps Embed**: `<iframe src="https://www.google.com/maps/embed/v1/place?key=...&q=ADDR&zoom=N">` se emite como `oxy_map` con `map_address` (URL-decoded) y `map_zoom` parseados.
+
+25. **`oxy_progress_bar` opt-in via `is-oxy-progress-bar`**: `<div class="is-oxy-progress-bar" data-percent="75">` → `oxy_progress_bar` con `progress_percent: "75"`. El HTML interno del div se descarta (Oxygen regenera su propia estructura). Sin opt-in, sigue siendo `ct_div_block`.
+
+26. **`ct_code_block` con `unwrap:true` opt-in via `is-oxy-unwrap`**: cualquier tag con esta clase se emite como `ct_code_block` con HTML completo en `code-php` y `unwrap: "true"`. Útil para preservar markup arbitrario sin transformación. Se evalúa antes de cualquier otro detector.
+
+### Filtro de clases internas
+
+27. **Clases internas inyectadas por Oxygen ya no contaminan el output**. Cuando user pega HTML rendered de un site Oxygen, las clases auto-inyectadas (`ct-div-block`, `ct-section-inner-wrap`, `oxy-progress-bar-background`, `ct-fancy-icon`, `oxy-icon-box-content`, prefijos `oxy-pro-menu`, `oxy-pricing-box`, `oxy-nav-menu-hamburger-`, etc.) se filtran del `classes:` array para evitar duplicación. Lista completa en `_OXYGEN_INTERNAL_CLASSES` y `_OXYGEN_INTERNAL_CLASS_PREFIXES` (catalogadas de `oxygen.css`).
+
+28. **Clases marker del skill también filtradas**: `is-oxy-section`, `is-oxy-columns`, `is-oxy-button`, `is-oxy-unwrap`, `is-oxy-progress-bar` se consumen como semáforos y se omiten del `classes:` final para no aparecer como entries vacías en el panel.
+
+### Limitaciones documentadas explícitamente
+
+- **JSON pegable es per-post** (postmeta `ct_builder_json`). Para site-wide imports (clases globales, color palette, stylesheets, page settings) usar Manage > Import en Oxygen — formato distinto con keys `classes`, `custom_selectors`, `style_sets`, `style_folders`, `style_sheets`, `global_settings`, `element_presets`, `global_colors`.
+- **Tras pegar el JSON**, regenerar CSS cache desde Settings > Cache > Regenerate (o el endpoint `?regenerate_oxygen_css=true`).
+- **WPML auto-traduce** el contenido de `ct_headline`, `ct_text_block`, `ct_paragraph`, `ct_li`, `ct_link_text` sin acción adicional.
+- **Componentes NO emitibles** (requieren WP runtime): `oxy_login_form`, `oxy_search_form`, `oxy_comments`, `oxy_comment_form`, `ct_widget`, `ct_sidebar`, `oxy_nav_menu`, `oxy_pro_menu`, `oxy_posts_grid` (Easy Posts), `oxy_dynamic_list`, `ct_toolset_view`, `ct_inner_content`, `ct_reusable`, `ct_shortcode`, `ct_nestable_shortcode`. El user debe crearlos manualmente en el builder.
+- **`_conditions`** (display rules): no se auto-emiten (no hay señal visible en HTML).
+- **`[oxygen ...]` dynamic shortcodes**: no emitibles desde el skill (requieren firma HMAC del site, generada por el editor al insertarlas).
+
+### Lo que NO se implementó (de la tercera auditoría)
+
+- `oxy_social_icons` (hard-coded a 6 redes, muy específico al estilo Oxygen).
+- `oxy_superbox` (2-state hover, uso nicho).
+- `oxy_soundcloud` (ultra-nicho).
+- `ct_slider`/`ct_slide` (requiere unslider JS y `<script>` inline).
+- `oxy_gallery` (requiere `image_ids` de WP media library).
+- `oxy_header*` builder, `ct_inner_content` (solo tienen sentido en templates de Oxygen).
 
 ## Si el usuario pide algo que está fuera de scope
 

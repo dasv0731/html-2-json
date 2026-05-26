@@ -11,6 +11,10 @@ Transforma un par HTML + CSS en el JSON que se pega en un bloque reusable de Oxy
 - **Fase 1 y 2** (heredadas de v2): mapeo semántico de listas, fix arquitectónico de `margin: 0` en `ct_div_block`, auto-adiciones inteligentes (icon-size, flex en links icono+texto, flex-direction row por default), diferenciación de `gap` en flex vs grid, expansión correcta de `background` shorthand, `oxy_rich_text` sin `<p>` envolvente cuando hay `useCustomTag`.
 - **Fase 3** (nueva en v3): sufijo de selector parametrizable por CLI, `original: []` cuando está vacío (formato correcto de Oxygen), clases referenciadas en HTML aunque no tengan CSS, atributos HTML arbitrarios preservados como `custom-attributes`, y soporte completo de pseudo-clases/elementos como states nativos de Oxygen.
 
+**v3.1** (auditoría contra código fuente de Oxygen, 2026-05-26): fix de `<img>` rota, box-shadow/text-shadow broken-out editables, auto-flex en bloque (no en clases), ampliación de `NATIVE_PROPERTIES` (transitions, filters, grid avanzado, AOS, etc.), `var()` nativo en colores, grid `auto-fit/minmax`, pseudo-elementos `first-letter/first-line/selection`, `:visited`. Ver sección "v3.1" más abajo y `CHANGELOG.md`.
+
+**v3.2** (cobertura extendida, 2026-05-26): `filter` parseado a `filter-amount-*` broken-out (editable), `transform` como array de transform-step objects, `data-aos-*` del HTML mapeado a keys `aos-*` nativas, mapeo completo de tablas (`<table>/<thead>/<tbody>/<tr>/<td>/<th>`), forms (`<form>/<input>/<label>/<select>/<textarea>/<button>/<fieldset>/<legend>`), void elements (`<hr>/<input>/<col>/<br>`) y otros block-level (`<blockquote>/<pre>/<code>/<figcaption>/<summary>`). `style="..."` inline soportado (antes rechazado). Comentarios HTML ya no generan `ct_text_block` ruido.
+
 ## Cuándo usar este skill
 
 El usuario quiere convertir HTML/CSS a JSON de Oxygen para pegar en un bloque reusable. Señales típicas:
@@ -45,7 +49,7 @@ ct_link [clases-del-link]
 └── ct_text_block "texto"
 ```
 
-**Auto-flex en links con icono + texto**: cuando se detecta el patrón anterior, el skill añade automáticamente a las clases del link `display: flex`, `flex-direction: row`, `gap: 8` (solo si no estaban en el CSS). Esto resuelve que el icono y el texto aparezcan en columna en lugar de fila. **Limitación conocida**: actualmente el auto-flex se aplica a TODAS las clases del link, no solo a la modifier. Bug pendiente.
+**Auto-flex en links con icono + texto**: cuando se detecta el patrón anterior, el skill añade automáticamente `display: flex`, `flex-direction: row`, `gap: 8` al `options.original` del bloque `ct_link` específico (no a las clases). Esto resuelve que el icono y el texto aparezcan en columna en lugar de fila sin contaminar clases reusables. La inyección solo aplica si NINGUNA clase del link definió `display` en el CSS del user — si lo hizo, se respeta su elección.
 
 **Auto-`icon-size` en `ct_fancy_icon`**: el wrapper div de `ct_fancy_icon` recibe `width`/`height` de la clase, pero el SVG interno NO los respeta — usa `icon-size` (propiedad propia de Oxygen). Cuando una clase con `width` o `height` se aplica a un `ct_fancy_icon`, el skill emite también `icon-size` automáticamente con el valor de `width` (o `height` si solo hay height).
 
@@ -83,7 +87,7 @@ El input es estricto. Si el HTML/CSS no cumple, NO ejecutes el script: dile al u
 
 ### HTML
 - **Una clase por elemento** en el atributo `class`. Múltiples clases son válidas si están separadas por espacio: `<div class="card card-large">`.
-- **Sin `style="..."` inline**. Si el usuario lo incluye, pide que lo migre a una clase.
+- **`style="..."` inline soportado** (desde v3.2). Las propiedades se mergean en `options.original` del bloque específico (no en las clases, para no contaminar otros bloques que compartan clase). Inline tiene prioridad sobre lo definido en las clases para ese bloque concreto.
 - **Solo tags soportados** (ver `references/block-types.md` para la tabla completa). Tags exóticos o componentes sin equivalente en Oxygen requieren ajuste manual.
 - **Atributos HTML arbitrarios permitidos**: el skill preserva `aria-*`, `data-*`, `role`, `rel`, `title`, etc. automáticamente vía `custom-attributes`.
 
@@ -107,12 +111,16 @@ Las siguientes pseudo-clases CSS se mapean a **states nativos de Oxygen** (paral
 | `:hover` | `hover` | |
 | `:focus` | `focus` | |
 | `:active` | `active` | |
+| `:visited` | `visited` | Solo aplica a links |
 | `:disabled` | `disabled` | |
 | `:checked` | `checked` | Inputs tipo checkbox/radio |
 | `:first-child` | `first-child` | |
 | `:last-child` | `last-child` | |
 | `:before` o `::before` | `before` | Ambas sintaxis CSS aceptadas |
 | `:after` o `::after` | `after` | Ambas sintaxis CSS aceptadas |
+| `::first-letter` | `first-letter` | Pseudo-elemento tipográfico |
+| `::first-line` | `first-line` | Pseudo-elemento tipográfico |
+| `::selection` | `selection` | Texto seleccionado |
 | `:nth-child(N)` | `nth-child(N)` | N puede ser número (2), expresión (2n+1), o keyword (odd/even). Validado empíricamente en frontend de Oxygen. Cuenta TODOS los hijos del padre sin importar tag. |
 | `:nth-of-type(N)` | `nth-of-type(N)` | Mismo formato que nth-child. Validado empíricamente en frontend de Oxygen. **Importante**: cuenta solo elementos del MISMO tag. Para que aplique como esperás, los hermanos del elemento deben compartir el mismo tag HTML. |
 | `:nth-last-child(N)` | `nth-last-child(N)` | Mismo formato. Validado empíricamente en frontend de Oxygen. Cuenta hijos desde el final. |
@@ -123,7 +131,7 @@ Para `:before` y `::after`, el valor de `content` se normaliza quitando comillas
 **Lo que NO se mapea a state nativo** y va al Code Block:
 - `:not(.x)` (argumento es otro selector, no un state)
 - `:focus-visible`, `:focus-within` (no validados)
-- `:placeholder`, `:read-only`, `:required`, `:valid`, `:invalid` (no validados)
+- `::placeholder`, `:read-only`, `:required`, `:valid`, `:invalid` (no validados)
 - Cualquier otra pseudo-clase no listada arriba
 - Selectores con combinadores (`.foo > .bar`, `.foo .bar`, `.foo + .bar`)
 - Selectores con `[atributo]`
@@ -170,7 +178,7 @@ Sé honesto con el usuario sobre estas:
 - **`display: grid` con posicionamiento por `grid-area` o `grid-column: 2 / 4`**: Oxygen Grid usa un modelo distinto (`grid-child-rules` con `column-span` / `row-span`). El skill traduce span simples; posicionamiento absoluto va al `custom-css` o al Code Block.
 - **`<ul>` y `<li>`**: mapeo semántico con `useCustomTag`. `<ul>/<ol>` → `ct_div_block` con `useCustomTag: true, tag: ul/ol`. `<li>` con texto plano → `ct_text_block[li]`. `<li>` con HTML inline mixto (incluyendo `<a>`, `<em>`, `<strong>`, `<br>`) → `oxy_rich_text[li]` con contenido inline directo (sin `<p>` envolvente). `<li>` con tags estructurales hijos (div, h1-h6, ul anidado) → `ct_div_block[li]`. Validado contra exports reales de Oxygen.
 - **Bug pre-existente en media queries**: en algunos casos un media query puede emitir `display: grid` espurio que no estaba en el CSS original. Bug conocido pendiente.
-- **Bug auto-flex en múltiples clases**: cuando un link tiene varias clases (`btn btn--whatsapp btn--sm`), el auto-flex se aplica a TODAS las clases en lugar de solo a la modifier. Si alguna clase se reutiliza en otro contexto sin icono, recibe flex erróneamente. Workaround: usar clases únicas por componente. Fix del skill pendiente.
+- **Auto-flex en múltiples clases (resuelto en v3.1)**: el auto-flex ahora va al `options.original` del bloque `ct_link` específico, no a las clases. Las clases compartidas (`btn`, `btn--whatsapp`) no reciben flex y siguen reusables en otros contextos.
 - **`<button>` HTML: mapeo por trío según contenido** (paralelo a `<li>`):
   - `<button>Texto plano</button>` → `ct_text_block` con `useCustomTag: true, tag: "button"`.
   - `<button>Texto <em>inline mixto</em></button>` → `oxy_rich_text` con `useCustomTag: true, tag: "button"`.
@@ -206,7 +214,7 @@ Estos son problemas recurrentes al usar Oxygen que el skill NO puede resolver au
 Para que sepas qué propiedades aparecen en el output que NO escribiste en tu CSS:
 
 - **`flex-direction: row`**: cuando una clase tiene `display: flex` pero no `flex-direction`, el skill añade `row` (Oxygen no asume row por default).
-- **`display: flex; flex-direction: row; gap: 8`**: cuando un `<a>` tiene icono + texto, el skill añade estas tres propiedades a las clases del link (postura A confirmada).
+- **`display: flex; flex-direction: row; gap: 8` en el bloque `ct_link`**: cuando un `<a>` tiene icono + texto, el skill añade estas tres propiedades al `options.original` del bloque específico (no a las clases). Solo aplica si ninguna clase del link definió `display` en el CSS.
 - **`icon-size`**: cuando una clase con `width` o `height` se aplica a un `ct_fancy_icon`, el skill emite también `icon-size` con el valor de `width` para que el SVG interno respete el tamaño.
 - **`margin-* !important` en `custom-css` para `ct_div_block`**: cuando una clase con `margin-top/bottom/left/right` numérico se aplica a un `ct_div_block`, el skill redirige a `custom-css` con `!important` para sobrevivir el `margin: 0` que Oxygen aplica por default.
 - **`custom-attributes` desde atributos HTML**: cualquier atributo HTML que no sea `class`, `id`, `href`, `src`, `alt`, `target`, `width`, `height`, `srcset`, `loading` o `xlink:href` se preserva en `original.custom-attributes`.
@@ -255,6 +263,61 @@ Cambios incrementales a la v3 ya publicada. Mantienen total compatibilidad con o
 3. **`<button>` HTML mapeado a `useCustomTag: button`**: el skill ya no fuerza `<button>` a `ct_link_button` (que renderizaba como `<a>`, perdiendo la semántica). Ahora aplica un trío de mapeos según contenido — `ct_text_block` para texto plano, `oxy_rich_text` para HTML inline mixto, `ct_div_block` para hijos estructurales — todos con `useCustomTag: true, tag: "button"`. El componente renderiza un `<button>` HTML real y los atributos del button (`type`, `onclick`, `aria-*`, `data-*`, etc.) son editables vía `custom-attributes` desde el panel de Oxygen. Los tres casos del trío validados empíricamente con JSONs pegados en Oxygen.
 
 4. **`ct_code_block` con HTML literal: sin duplicar `custom-attributes`**: cuando un tag se mapea a `ct_code_block` (Rutas B/C de iconos), los atributos HTML viajan dentro del `code-php`. Antes el skill los duplicaba también como `custom-attributes` del bloque, generando ruido. Ahora se omiten en ese caso.
+
+## v3.1 — auditoría contra código fuente de Oxygen (2026-05-26)
+
+Sesión de polish basada en auditoría del código PHP/Angular de Oxygen. Cambios agrupados por tipo. Detalle completo en `CHANGELOG.md` entrada "2026-05-26".
+
+### Bugs críticos arreglados
+
+5. **`<img>` ahora renderiza inmediatamente**: emite `image_type: "1"` + `src` + `alt` (URL-based). Antes emitía `image_type: "2"` con `attachment_id: 0`, que en el render de Oxygen caía a la rama placeholder leyendo `$options['src']` (vacío) — la imagen no aparecía hasta reasignación manual. El `alt` ya no se descarta.
+
+6. **`box-shadow` y `text-shadow` editables en el panel**: nuevos expansores `_expand_box_shadow` y `_expand_text_shadow` parsean el shorthand CSS a las keys broken-out que Oxygen entiende como nativas (`box-shadow-color`, `-horizontal-offset`, `-vertical-offset`, `-blur`, `-spread`, `-inset`). Antes la sombra se veía pero el panel Effects no la mostraba. Múltiples sombras (separadas por coma) o lengths con unidades distintas a `px` siguen yendo a `custom-css`.
+
+7. **Auto-flex de icono+texto en `<a>` ya no contamina clases compartidas**: la inyección de `display:flex / flex-direction:row / gap:8` va al `options.original` del bloque `ct_link` específico, no a las clases. Si el user definió `display` en alguna clase del link, se respeta (no se inyecta). Implementado como marca interna `__needs_auto_flex__` + post-proceso `apply_auto_flex_to_links()` después de parsear el CSS.
+
+### Cobertura ampliada (menos `custom-css` innecesario)
+
+8. **`NATIVE_PROPERTIES` alineado con `$options_white_list` real de Oxygen**: sumadas como nativas: `transition-*` (con units), `filter` y `filter-amount-*`, `text-shadow-*` (broken-out), `float`, `clear`, `direction`, `list-style-type`, `visibility`, `order`, `-webkit-font-smoothing`, `background-attachment`, `background-clip`, `background-blend-mode`, `mix-blend-mode`, `overlay-color`, `gradient`, grid avanzado (`grid-columns-auto-fit`, `grid-column-min/max-width`, `grid-row-count`, `grid-row-behavior`, `grid-row-min/max-height`, `grid-all-children-rule`, `grid-justify-items`, `grid-align-items`, `grid-match-height-of-tallest-child`), `container-padding-*`, todas las `aos-*`, `button-size`, `button-color`, `button-hover_color`.
+
+9. **`grid-template-columns: repeat(auto-fit, minmax(Xpx, 1fr))` mapeado nativo**: emite `grid-columns-auto-fit: "1"` + `grid-column-min-width: "X"`. Patrón muy común en grids responsivos que antes se perdía a `custom-css`.
+
+10. **`var()` en propiedades de color queda nativo**: para `color`, `background-color`, `border-*-color`, `button-text-color`, `overlay-color`, `box-shadow-color`, `text-shadow-color`, `icon-color`, `icon-background-color`, `fill`, `stroke`, los valores con `var()`/`calc()`/`clamp()`/etc. se emiten directamente. Oxygen los preserva como string opaco en el panel y renderiza tal cual. Mismo trato para `transition-property`. Reduce mucho el `custom-css` en sitios con design tokens.
+
+11. **Pseudo-elementos extra y `:visited`**: agregados `first-letter`, `first-line`, `selection` (set completo según `is_pseudo_element()` de Oxygen) y la pseudo-clase `:visited`. Antes iban a Code Block; ahora se emiten como state nativo.
+
+### Limpieza arquitectónica
+
+12. **`<a>` → `ct_link_button` requiere opt-in explícito**: el mapeo a `ct_link_button` ahora se dispara solo si la clase `is-oxy-button` está presente. Antes cualquier `<a class="...btn...">` o `...button...` o `...boton...` se convertía en `ct_link_button` (que renderiza con estilos de botón nativos de Oxygen, tapando los del user). Todo lo demás cae a `ct_link` (con hijos) o `ct_link_text` (solo texto).
+
+13. **Removido `original.tag` duplicado en classes top-level**: `tag` es opción del bloque, no de la clase. Inyectarlo en las clases forzaba el mismo tag a cualquier otro bloque que compartiera la clase. Ahora `tag` vive solo en `options.original` del bloque correspondiente.
+
+## v3.2 — cobertura extendida (2026-05-26)
+
+Segunda iteración del mismo día. Ataca los pendientes deliberados de v3.1.
+
+### Nuevas capacidades nativas
+
+14. **`filter: <fn>(<arg>)` mapeado broken-out**: `filter: blur(8px)` ahora emite `filter: "blur"` + `filter-amount-blur: "8"` (con `-unit` si difiere del default). Editable desde el panel Effects. Funciones soportadas: `blur`, `brightness`, `contrast`, `grayscale`, `hue-rotate`, `invert`, `saturate`, `sepia`. Múltiples funciones simultáneas, valores ambiguos (ej. `brightness(0.8)` sin unidad) y funciones no soportadas (`drop-shadow`, `matrix`, etc.) caen a `custom-css`.
+
+15. **`transform` como array de transform-step objects**: `transform: translate(10px,20px) rotate(45deg) scale(1.2)` se emite como array de 3 step-objects que Oxygen ensambla en `getTransformCSS`. Funciones soportadas: `translate*`, `translate3d`, `rotate*`, `scale*`, `scale3d`, `skew*`, `perspective`. `matrix`, `matrix3d`, `rotate3d` con args sueltos van a `custom-css`. `transform` agregado a `NATIVE_PROPERTIES`.
+
+16. **`data-aos-*` del HTML → keys `aos-*` nativas**: `<div data-aos="fade-up" data-aos-duration="600">` se emite con `original.aos-type: "fade-up"` y `original.aos-duration: "600"` en lugar de pasarlos como `custom-attributes` inertes. Editables desde el panel "Effects > Animation on Scroll". Mapeo: `data-aos` → `aos-type`, los demás `data-aos-*` → `aos-*` con el mismo sufijo.
+
+### Tags HTML adicionales
+
+17. **Tablas, forms, blockquote, pre, hr, etc. ya no caen a "Tag desconocido"**. Tres categorías:
+    - **Pure containers** (`<table>/<thead>/<tbody>/<tfoot>/<tr>/<colgroup>/<form>/<fieldset>/<select>/<blockquote>/<pre>`): `ct_div_block` con `useCustomTag` + tag.
+    - **Void elements** (`<input>/<hr>/<col>/<br>`): `ct_div_block` con `useCustomTag`, sin children. Atributos del input viajan como `custom-attributes`.
+    - **Trio** (`<td>/<th>/<caption>/<label>/<legend>/<figcaption>/<summary>/<option>/<code>/<textarea>`): mismo trío que `<li>`/`<button>` — estructural → `ct_div_block`, inline mixto → `oxy_rich_text`, texto plano → `ct_text_block`.
+
+### `style="..."` inline soportado
+
+18. **Eliminada la regla de rechazo de `style` inline del contrato**. Las propiedades se parsean con tinycss2 y se mergean en `options.original` del bloque específico (no en las clases — evita contaminar otros bloques que compartan clase). Inline tiene prioridad sobre lo que ya estaba en `original`. Propiedades no nativas se concatenan al `custom-css` existente del bloque. El atributo `style` se excluye de `custom-attributes`.
+
+### Bug pre-existente arreglado
+
+19. **Comentarios HTML (`<!-- ... -->`) generaban `ct_text_block` ruido**: BeautifulSoup expone `Comment` como subclase de `NavigableString`. Fix: importar `Comment` y `continue` cuando aparece como hijo, tanto en `_build_component` como en `_maybe_inject_text_child`.
 
 ## Si el usuario pide algo que está fuera de scope
 

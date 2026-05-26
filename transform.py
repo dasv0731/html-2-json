@@ -20,7 +20,7 @@ from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 
 import tinycss2
-from bs4 import BeautifulSoup, NavigableString, Tag
+from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 
 
 # ============================================================
@@ -101,36 +101,75 @@ NICENAME_BASE = {
     "oxy_rich_text": "Rich Text",
 }
 
-# Propiedades CSS soportadas nativamente por Oxygen
+# Propiedades CSS soportadas nativamente por Oxygen (panel editable).
+# Verificado contra $options_white_list en components/component.class.php:224-453
+# del codigo de Oxygen Builder 4.x.
 NATIVE_PROPERTIES = {
     # Layout
-    "display", "flex-direction", "flex-wrap", "justify-content", "align-items",
-    "align-content", "align-self", "flex-grow", "flex-shrink", "flex-reverse",
-    "column-gap", "row-gap", "gap", "grid-column-gap", "grid-row-gap",
-    "grid-column-count", "grid-child-rules",
-    "position", "top", "right", "bottom", "left", "z-index",
+    "display", "float", "clear", "visibility", "position",
+    "top", "right", "bottom", "left", "z-index",
     "overflow", "overflow-x", "overflow-y",
+    "flex-direction", "flex-wrap", "justify-content", "align-items",
+    "align-content", "align-self", "flex-grow", "flex-shrink", "flex-reverse",
+    "order",
+    "column-gap", "row-gap", "gap", "grid-column-gap", "grid-row-gap",
+    # Grid (panel nativo completo)
+    "grid-column-count", "grid-columns-auto-fit",
+    "grid-column-min-width", "grid-column-max-width",
+    "grid-row-count", "grid-row-behavior",
+    "grid-row-min-height", "grid-row-max-height",
+    "grid-child-rules", "grid-all-children-rule",
+    "grid-justify-items", "grid-align-items",
+    "grid-match-height-of-tallest-child",
     # Espaciado
     "padding-top", "padding-right", "padding-bottom", "padding-left",
     "margin-top", "margin-right", "margin-bottom", "margin-left",
+    "container-padding-top", "container-padding-right",
+    "container-padding-bottom", "container-padding-left",
     "width", "height", "min-width", "min-height", "max-width", "max-height",
     # Tipografia
     "font-family", "font-size", "font-weight", "font-style",
-    "color", "line-height", "letter-spacing",
+    "color", "line-height", "letter-spacing", "direction",
     "text-align", "text-transform", "text-decoration",
-    # Visual
+    "list-style-type", "-webkit-font-smoothing",
+    # Visual / background
     "background-color", "background-image", "background-position",
-    "background-repeat", "background-size",
+    "background-repeat", "background-size", "background-attachment",
+    "background-clip", "background-blend-mode", "mix-blend-mode",
+    "overlay-color", "gradient",
+    # Borders (broken-out, los soportados por el panel)
     "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
     "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
     "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
     "border-top-left-radius", "border-top-right-radius",
     "border-bottom-left-radius", "border-bottom-right-radius",
-    "opacity", "box-shadow",
-    # Botones (excepcion)
-    "button-text-color",
+    # Effects
+    "opacity",
+    # box-shadow y text-shadow se emiten broken-out (no como shorthand).
+    # El expansor parsea el CSS shorthand a estas keys para que sean editables.
+    "box-shadow-color", "box-shadow-horizontal-offset", "box-shadow-vertical-offset",
+    "box-shadow-blur", "box-shadow-spread", "box-shadow-inset",
+    "text-shadow-color", "text-shadow-horizontal-offset", "text-shadow-vertical-offset",
+    "text-shadow-blur",
+    # Transitions
+    "transition-duration", "transition-timing-function",
+    "transition-delay", "transition-property",
+    # Transform: array de transform-step objects (parseado por _expand_transform).
+    "transform",
+    # Filters
+    "filter",
+    "filter-amount-blur", "filter-amount-brightness", "filter-amount-contrast",
+    "filter-amount-grayscale", "filter-amount-hue-rotate",
+    "filter-amount-invert", "filter-amount-saturate", "filter-amount-sepia",
+    # Animations on Scroll (AOS) - mapeables desde data-aos-* del HTML
+    "aos-type", "aos-duration", "aos-easing", "aos-offset", "aos-delay",
+    "aos-anchor", "aos-anchor-placement", "aos-once", "aos-enable",
+    # Botones (solo aplica a ct_link_button via excepcion en convert_properties)
+    "button-text-color", "button-color", "button-hover_color", "button-size",
     # Imagenes
-    "object-fit", "object-position",
+    "object-fit", "object-position", "aspect-ratio",
+    # Iconos (ct_fancy_icon)
+    "icon-size", "icon-color", "icon-background-color", "icon-padding",
     # Pseudo-elementos (validado en JSON real de Oxygen para before/after)
     "content",
 }
@@ -144,6 +183,25 @@ ALWAYS_EMIT_UNIT = {
 UNITLESS_PROPERTIES = {
     "opacity", "z-index", "font-weight", "flex-grow", "flex-shrink",
     "order", "line-height",  # line-height es unitless O con unidad, manejo especial
+    # AOS flags y datos no-numericos
+    "aos-once", "aos-enable", "aos-anchor", "aos-easing", "aos-type",
+    "aos-anchor-placement",
+    # Grid counts y rules (numericos pero sin unidad)
+    "grid-column-count", "grid-row-count",
+    "grid-columns-auto-fit", "grid-match-height-of-tallest-child",
+}
+
+# Propiedades de color: aceptan var(), calc() y funciones complejas como valor nativo.
+# Oxygen no rompe si el panel recibe un var(--token); lo muestra como string opaco.
+# Esto reduce el ruido en custom-css cuando el sitio usa design tokens.
+COLOR_PROPERTIES = {
+    "color", "background-color",
+    "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
+    "button-text-color", "button-color", "button-hover_color",
+    "overlay-color",
+    "box-shadow-color", "text-shadow-color",
+    "icon-color", "icon-background-color",
+    "fill", "stroke",
 }
 
 
@@ -339,12 +397,15 @@ def _strip_content_quotes(value: str) -> str:
 
 
 # Lista de pseudo-clases sin argumento que Oxygen acepta como state nativo.
-# Validado empiricamente pegando JSONs en Oxygen y viendo que se renderizan.
+# Validado contra set_options/build_css en component.class.php:2548-2560:
+# Oxygen acepta CUALQUIER sibling array de `original` como state y lo emite
+# como `#selector:<key>{...}`. La lista de abajo son las que tienen sentido
+# semantico estandar y han sido verificadas en el editor.
 # Las que NO estan aqui (focus-visible, focus-within, placeholder, read-only,
-# etc.) NO han sido validadas y van a Code Block para no producir regresiones
-# silenciosas.
+# required, valid, invalid, etc.) NO se mapean para no producir regresiones
+# silenciosas y van a Code Block.
 NATIVE_SIMPLE_PSEUDO = {
-    "hover", "focus", "active",
+    "hover", "focus", "active", "visited",
     "disabled", "checked",
     "first-child", "last-child",
 }
@@ -352,8 +413,10 @@ NATIVE_SIMPLE_PSEUDO = {
 # Pseudo-elementos que Oxygen acepta. Tanto `:before` como `::before` son
 # sintacticamente validas en CSS y refieren al mismo concepto; ambas se
 # mapean a la misma key sin los dos puntos.
+# Set completo segun is_pseudo_element() en component-init.php:3878.
 NATIVE_PSEUDO_ELEMENTS = {
     "before", "after",
+    "first-letter", "first-line", "selection",
 }
 
 # Pseudo-clases con argumento entre parentesis que Oxygen acepta como state.
@@ -490,6 +553,14 @@ def expand_shorthands(props: Dict[str, str]) -> Dict[str, str]:
                     # En flex tambien existen row-gap y column-gap separados.
                     out["row-gap"] = parts[0]
                     out["column-gap"] = parts[1]
+        elif prop == "box-shadow":
+            out.update(_expand_box_shadow(val))
+        elif prop == "text-shadow":
+            out.update(_expand_text_shadow(val))
+        elif prop == "filter":
+            out.update(_expand_filter(val))
+        elif prop == "transform":
+            out.update(_expand_transform(val))
         elif prop == "background":
             # Shorthand. Casos:
             # - color simple (#hex, rgb, rgba, hsl, transparent, palabra) -> background-color
@@ -651,6 +722,380 @@ def _is_border_width_numeric(s: str) -> bool:
     return rest.lower() in ("px", "em", "rem", "pt", "%", "vw", "vh", "ex", "ch")
 
 
+def _strip_px(val: str) -> str:
+    """Quita el sufijo 'px' de un valor numerico.
+    Oxygen agrega 'px' al renderizar los offset/blur/spread de box-shadow y
+    text-shadow, asi que guardamos el numero pelado."""
+    val = val.strip()
+    if val.lower().endswith("px"):
+        return val[:-2]
+    return val
+
+
+def _has_top_level_comma(val: str) -> bool:
+    """True si val tiene una coma fuera de cualquier parentesis. Sirve para
+    detectar valores multi-sombra de box-shadow/text-shadow sin confundirse con
+    las comas de rgb()/rgba()/hsl()/var()."""
+    depth = 0
+    for ch in val:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            return True
+    return False
+
+
+def _length_in_px_or_zero(val: str) -> bool:
+    """True si el valor es '0' puro o un numero seguido de 'px'. Estos son los
+    unicos formatos validos para los offsets/blur/spread de Oxygen, que hardcodea
+    'px' al renderizar (component.class.php:3335-3338)."""
+    s = val.strip().lower()
+    if s == "0":
+        return True
+    return bool(re.match(r"^-?\d+(\.\d+)?px$", s))
+
+
+def _expand_box_shadow(val: str) -> Dict[str, str]:
+    """Expande box-shadow shorthand a las keys broken-out que Oxygen entiende
+    como nativas (box-shadow-color/-horizontal-offset/-vertical-offset/-blur/
+    -spread/-inset). Asi quedan editables desde el panel Effects.
+
+    Soporta una unica sombra con offsets en px (o '0'). Multiples sombras
+    (separadas por coma fuera de parentesis) o unidades no-px caen a
+    custom-css completo.
+
+    Formato CSS: [inset] <h> <v> [blur] [spread] <color>
+    El `inset` puede aparecer al principio o al final segun la spec; el
+    parser acepta ambos.
+    """
+    if _has_top_level_comma(val):
+        return {"__custom_css__box-shadow": val}
+
+    parts = _split_top_level(val)
+    if not parts:
+        return {}
+
+    out: Dict[str, str] = {}
+
+    # Detectar 'inset' (case-insensitive) y separarlo
+    lowered = [p.lower() for p in parts]
+    if "inset" in lowered:
+        out["box-shadow-inset"] = "inset"
+        parts = [p for p, lo in zip(parts, lowered) if lo != "inset"]
+
+    # Clasificar el resto en lengths (numericos) y color (lo demas)
+    lengths: List[str] = []
+    color: Optional[str] = None
+    for p in parts:
+        if _length_in_px_or_zero(p):
+            lengths.append(p)
+        else:
+            color = p
+
+    # Si alguna length usa unidad distinta a px (em/rem/etc), Oxygen no la
+    # respetaria (hardcodea px al renderizar). Fallback a custom-css.
+    rejected_lengths = [p for p in parts if p != color and p.lower() != "inset"
+                        and not _length_in_px_or_zero(p)]
+    if rejected_lengths:
+        return {"__custom_css__box-shadow": val}
+
+    if len(lengths) >= 1:
+        out["box-shadow-horizontal-offset"] = _strip_px(lengths[0])
+    if len(lengths) >= 2:
+        out["box-shadow-vertical-offset"] = _strip_px(lengths[1])
+    if len(lengths) >= 3:
+        out["box-shadow-blur"] = _strip_px(lengths[2])
+    if len(lengths) >= 4:
+        out["box-shadow-spread"] = _strip_px(lengths[3])
+    if color:
+        out["box-shadow-color"] = color
+
+    return out
+
+
+# Map de funcion CSS de filter -> (key Oxygen sin el "filter-amount-" prefix, unit default).
+# La key real en Oxygen es "filter-amount-<nombre>". El valor de la option `filter`
+# es el nombre de la funcion (string). Verificado en controller.css.js:5383
+# donde Oxygen renderiza con `value += "(" + options["filter-amount-" + value] + ")"`.
+_FILTER_FN_INFO = {
+    "blur":        ("blur",        "px"),
+    "brightness":  ("brightness",  "%"),
+    "contrast":    ("contrast",    "%"),
+    "grayscale":   ("grayscale",   "%"),
+    "hue-rotate":  ("hue-rotate",  "deg"),
+    "invert":      ("invert",      "%"),
+    "saturate":    ("saturate",    "%"),
+    "sepia":       ("sepia",       "%"),
+}
+
+
+def _expand_filter(val: str) -> Dict[str, str]:
+    """Expande filter: <fn>(<arg>) a las keys nativas de Oxygen:
+      filter: "<fnname>"   (nombre de la funcion, sin parentesis)
+      filter-amount-<fnname>: "<numero>"
+      filter-amount-<fnname>-unit: "<unit>"   (si difiere del default)
+
+    Oxygen solo soporta UNA funcion de filter por elemento (controller.css.js:5383
+    ensambla `value += "(" + options["filter-amount-" + value] + ")"`). Para casos
+    de multiples funciones, fallback a custom-css completo.
+
+    Funciones soportadas: blur, brightness, contrast, grayscale, hue-rotate,
+    invert, saturate, sepia. Cualquier otra (drop-shadow, opacity como filter)
+    va a custom-css.
+
+    Heuristica de unidad: si la funcion tiene default "%" y el valor CSS viene
+    SIN unidad (ej. brightness(0.8) = multiplicador 0-1), Oxygen lo renderizaria
+    como "0.8%" lo cual seria erroneo. Para evitar regresiones silenciosas, en
+    ese caso fallback a custom-css.
+    """
+    matches = re.findall(r"([a-zA-Z-]+)\(([^)]*)\)", val)
+    if not matches:
+        return {"__custom_css__filter": val}
+    # Solo una funcion soportada nativamente
+    if len(matches) != 1:
+        return {"__custom_css__filter": val}
+    fn_name_raw, fn_arg = matches[0]
+    fn_name = fn_name_raw.lower()
+    if fn_name not in _FILTER_FN_INFO:
+        return {"__custom_css__filter": val}
+    canonical, default_unit = _FILTER_FN_INFO[fn_name]
+    arg = fn_arg.strip()
+    m = re.match(r"^(-?\d+(?:\.\d+)?)([a-zA-Z%]*)$", arg)
+    if not m:
+        return {"__custom_css__filter": val}
+    num = m.group(1)
+    unit = m.group(2) or None
+    # Si el default es % pero el CSS no trae unidad, podria ser multiplicador.
+    # Para no introducir regresiones silenciosas, fallback a custom-css.
+    if default_unit == "%" and not unit:
+        return {"__custom_css__filter": val}
+    out: Dict[str, str] = {
+        "filter": canonical,
+        f"filter-amount-{canonical}": num,
+    }
+    if unit and unit != default_unit:
+        out[f"filter-amount-{canonical}-unit"] = unit
+    return out
+
+
+_TRANSFORM_FN_RE = re.compile(r"([a-zA-Z0-9]+)\s*\(([^)]*)\)")
+
+
+def _parse_length_with_unit(s: str, default_unit: str = "px") -> Optional[Tuple[str, str]]:
+    """Parsea un valor numerico con unidad opcional. Retorna (num, unit) o None.
+    Si no trae unidad, asume default_unit."""
+    s = s.strip()
+    m = re.match(r"^(-?\d+(?:\.\d+)?)([a-zA-Z%]*)$", s)
+    if not m:
+        return None
+    return m.group(1), (m.group(2) or default_unit)
+
+
+def _expand_transform(val: str) -> Dict[str, Any]:
+    """Parsea transform: <fn>(<args>) ... y emite {transform: [step, ...]} donde
+    cada step es un dict con transform-type + campos especificos. Oxygen ensambla
+    el CSS final en getTransformCSS (component.class.php:4153).
+
+    Soporta:
+      translate(X[, Y]), translateX, translateY, translateZ, translate3d(X, Y, Z)
+      rotate(Ndeg), rotateX, rotateY
+      scale(X[, Y]), scaleX, scaleY, scaleZ, scale3d(X, Y, Z)
+      skew(Xdeg[, Ydeg]), skewX, skewY
+      perspective(Xunit)
+
+    Funciones no soportadas (matrix, matrix3d, rotate3d con args sueltos, etc.)
+    o parsing fallido -> fallback a custom-css completo via __custom_css__transform.
+    """
+    matches = _TRANSFORM_FN_RE.findall(val)
+    if not matches:
+        return {"__custom_css__transform": val}
+
+    steps: List[Dict[str, str]] = []
+    fallback = {"__custom_css__transform": val}
+
+    for fn_raw, args_raw in matches:
+        fn = fn_raw.strip()
+        args = [a.strip() for a in args_raw.split(",") if a.strip()]
+
+        if fn == "translate":
+            if len(args) == 1:
+                lu = _parse_length_with_unit(args[0])
+                if not lu: return fallback
+                num, unit = lu
+                step = {"transform-type": "translate", "translateX": num}
+                if unit != "px": step["translateX-unit"] = unit
+                steps.append(step)
+            elif len(args) == 2:
+                lu1 = _parse_length_with_unit(args[0])
+                lu2 = _parse_length_with_unit(args[1])
+                if not (lu1 and lu2): return fallback
+                step = {
+                    "transform-type": "translate",
+                    "translateX": lu1[0],
+                    "translateY": lu2[0],
+                }
+                if lu1[1] != "px": step["translateX-unit"] = lu1[1]
+                if lu2[1] != "px": step["translateY-unit"] = lu2[1]
+                steps.append(step)
+            else:
+                return fallback
+
+        elif fn == "translateX":
+            if len(args) != 1: return fallback
+            lu = _parse_length_with_unit(args[0])
+            if not lu: return fallback
+            step = {"transform-type": "translate", "translateX": lu[0]}
+            if lu[1] != "px": step["translateX-unit"] = lu[1]
+            steps.append(step)
+
+        elif fn == "translateY":
+            if len(args) != 1: return fallback
+            lu = _parse_length_with_unit(args[0])
+            if not lu: return fallback
+            step = {"transform-type": "translate", "translateY": lu[0]}
+            if lu[1] != "px": step["translateY-unit"] = lu[1]
+            steps.append(step)
+
+        elif fn == "translateZ":
+            if len(args) != 1: return fallback
+            lu = _parse_length_with_unit(args[0])
+            if not lu: return fallback
+            step = {"transform-type": "translate", "translateZ": lu[0]}
+            if lu[1] != "px": step["translateZ-unit"] = lu[1]
+            steps.append(step)
+
+        elif fn == "translate3d":
+            if len(args) != 3: return fallback
+            parsed = [_parse_length_with_unit(a) for a in args]
+            if not all(parsed): return fallback
+            step = {
+                "transform-type": "translate",
+                "translateX": parsed[0][0],
+                "translateY": parsed[1][0],
+                "translateZ": parsed[2][0],
+            }
+            for axis, lu in zip(("X", "Y", "Z"), parsed):
+                if lu[1] != "px": step[f"translate{axis}-unit"] = lu[1]
+            steps.append(step)
+
+        elif fn in ("rotate", "rotateX", "rotateY"):
+            if len(args) != 1: return fallback
+            # rotate solo acepta deg en Oxygen (hardcoded en getTransformCSS).
+            m = re.match(r"^(-?\d+(?:\.\d+)?)(deg)?$", args[0])
+            if not m: return fallback
+            angle = m.group(1)
+            field_map = {"rotate": "rotateAngle", "rotateX": "rotateXAngle", "rotateY": "rotateYAngle"}
+            steps.append({"transform-type": fn, field_map[fn]: angle})
+
+        elif fn == "scale":
+            # scale(N) o scale(X, Y)
+            if len(args) == 1:
+                if not _is_number(args[0]): return fallback
+                # scale(N) = scale(N, N) en CSS
+                steps.append({"transform-type": "scale", "scaleX": args[0], "scaleY": args[0]})
+            elif len(args) == 2:
+                if not (_is_number(args[0]) and _is_number(args[1])): return fallback
+                steps.append({"transform-type": "scale", "scaleX": args[0], "scaleY": args[1]})
+            else:
+                return fallback
+
+        elif fn == "scaleX":
+            if len(args) != 1 or not _is_number(args[0]): return fallback
+            steps.append({"transform-type": "scale", "scaleX": args[0]})
+
+        elif fn == "scaleY":
+            if len(args) != 1 or not _is_number(args[0]): return fallback
+            steps.append({"transform-type": "scale", "scaleY": args[0]})
+
+        elif fn == "scaleZ":
+            if len(args) != 1 or not _is_number(args[0]): return fallback
+            steps.append({"transform-type": "scale", "scaleZ": args[0]})
+
+        elif fn == "scale3d":
+            if len(args) != 3 or not all(_is_number(a) for a in args): return fallback
+            steps.append({"transform-type": "scale", "scaleX": args[0], "scaleY": args[1], "scaleZ": args[2]})
+
+        elif fn == "skew":
+            if len(args) == 1:
+                m = re.match(r"^(-?\d+(?:\.\d+)?)(deg)?$", args[0])
+                if not m: return fallback
+                steps.append({"transform-type": "skew", "skewX": m.group(1)})
+            elif len(args) == 2:
+                m1 = re.match(r"^(-?\d+(?:\.\d+)?)(deg)?$", args[0])
+                m2 = re.match(r"^(-?\d+(?:\.\d+)?)(deg)?$", args[1])
+                if not (m1 and m2): return fallback
+                steps.append({"transform-type": "skew", "skewX": m1.group(1), "skewY": m2.group(1)})
+            else:
+                return fallback
+
+        elif fn == "skewX":
+            if len(args) != 1: return fallback
+            m = re.match(r"^(-?\d+(?:\.\d+)?)(deg)?$", args[0])
+            if not m: return fallback
+            steps.append({"transform-type": "skew", "skewX": m.group(1)})
+
+        elif fn == "skewY":
+            if len(args) != 1: return fallback
+            m = re.match(r"^(-?\d+(?:\.\d+)?)(deg)?$", args[0])
+            if not m: return fallback
+            steps.append({"transform-type": "skew", "skewY": m.group(1)})
+
+        elif fn == "perspective":
+            if len(args) != 1: return fallback
+            lu = _parse_length_with_unit(args[0])
+            if not lu: return fallback
+            step = {"transform-type": "perspective", "perspective": lu[0]}
+            if lu[1] != "px": step["perspective-unit"] = lu[1]
+            steps.append(step)
+
+        else:
+            # matrix, matrix3d, rotate3d con args sueltos, etc.
+            return fallback
+
+    if not steps:
+        return fallback
+    return {"transform": steps}
+
+
+def _expand_text_shadow(val: str) -> Dict[str, str]:
+    """Expande text-shadow shorthand a las keys broken-out de Oxygen.
+    Estructura paralela a box-shadow pero sin `inset` ni `spread`.
+    Formato CSS: <h> <v> [blur] <color>
+    """
+    if _has_top_level_comma(val):
+        return {"__custom_css__text-shadow": val}
+
+    parts = _split_top_level(val)
+    if not parts:
+        return {}
+
+    lengths: List[str] = []
+    color: Optional[str] = None
+    for p in parts:
+        if _length_in_px_or_zero(p):
+            lengths.append(p)
+        else:
+            color = p
+
+    rejected = [p for p in parts if p != color and not _length_in_px_or_zero(p)]
+    if rejected:
+        return {"__custom_css__text-shadow": val}
+
+    out: Dict[str, str] = {}
+    if len(lengths) >= 1:
+        out["text-shadow-horizontal-offset"] = _strip_px(lengths[0])
+    if len(lengths) >= 2:
+        out["text-shadow-vertical-offset"] = _strip_px(lengths[1])
+    if len(lengths) >= 3:
+        out["text-shadow-blur"] = _strip_px(lengths[2])
+    if color:
+        out["text-shadow-color"] = color
+
+    return out
+
+
 def _expand_border_radius(val: str) -> Dict[str, str]:
     """Expande border-radius a las 4 esquinas. Maneja la sintaxis con / si aparece (la rechaza al Code Block en realidad).
 
@@ -730,11 +1175,22 @@ def convert_properties(props: Dict[str, str], block_type: Optional[str] = None) 
             custom_css.append(f"{real_prop}: {val};")
             continue
 
-        # Caso especial: grid-template-columns -> grid-column-count si es repeat(N, 1fr) o N veces 1fr
+        # Caso especial: transform es array de step-objects (no string).
+        # Lo emitimos como nativo directo (Oxygen lo lee en getTransformCSS).
+        if prop == "transform" and isinstance(val, list):
+            oxygen["transform"] = val
+            continue
+
+        # Caso especial: grid-template-columns -> propiedades nativas de Oxygen
+        # Soporta tres patrones (los demas van a custom-css):
+        #   repeat(N, 1fr)              -> grid-column-count: N
+        #   1fr 1fr 1fr ...             -> grid-column-count: N
+        #   repeat(auto-fit, minmax(Xpx, 1fr))  -> grid-columns-auto-fit + grid-column-min-width
         if prop == "grid-template-columns":
-            count = _grid_template_to_count(val)
-            if count is not None:
-                oxygen["grid-column-count"] = str(count)
+            mapped = _grid_template_to_oxygen(val)
+            if mapped is not None:
+                for k, v in mapped.items():
+                    oxygen[k] = v
                 continue
             # No mapea nativo: a custom-css
             custom_css.append(f"{prop}: {val};")
@@ -778,30 +1234,71 @@ def convert_properties(props: Dict[str, str], block_type: Optional[str] = None) 
 def _is_property_native(prop: str, val: str) -> bool:
     """
     Decide si una propiedad+valor pueden ir nativos a Oxygen.
-    Retorna False si el valor contiene calc(), clamp(), var(), etc.
+
+    Regla general: si el valor contiene una funcion CSS (calc/clamp/min/max/var/env)
+    el panel numerico de Oxygen no la puede editar, asi que mejor mandarla a
+    custom-css. EXCEPCION: propiedades de color y la propiedad `transition-property`
+    (que acepta strings arbitrarios) toleran var() y similares como valor nativo;
+    Oxygen las trata como string opaco en el panel y las renderiza tal cual.
     """
     if prop not in NATIVE_PROPERTIES:
         return False
-    # Valores con funciones complejas: van a custom-css
-    if any(fn in val for fn in ("calc(", "clamp(", "min(", "max(", "var(", "env(")):
-        return False
-    return True
+    has_fn = any(fn in val for fn in ("calc(", "clamp(", "min(", "max(", "var(", "env("))
+    if not has_fn:
+        return True
+    # Colores con var() / color-mix() / etc.: Oxygen los preserva como string nativo.
+    if prop in COLOR_PROPERTIES:
+        return True
+    # transition-property acepta string arbitrario (incluyendo nombres de var
+    # personalizadas si el usuario las usa).
+    if prop == "transition-property":
+        return True
+    return False
 
 
-def _grid_template_to_count(val: str) -> Optional[int]:
+def _grid_template_to_oxygen(val: str) -> Optional[Dict[str, str]]:
     """
-    Si grid-template-columns es 'repeat(N, 1fr)' o '1fr 1fr ... 1fr',
-    retorna N. Si no, retorna None (no mapea nativo).
+    Mapea `grid-template-columns` a las keys nativas de Oxygen cuando es posible.
+    Retorna un dict de overrides o None si el valor no mapea.
+
+    Patrones reconocidos:
+      - repeat(N, 1fr)                    -> {grid-column-count: "N"}
+      - "1fr 1fr ... 1fr"                 -> {grid-column-count: "<len>"}
+      - repeat(auto-fit, minmax(Xu, 1fr)) -> {grid-columns-auto-fit: "1",
+                                              grid-column-min-width: "X",
+                                              grid-column-min-width-unit: "u" if u!=px}
+      - repeat(auto-fill, ...)            -> mismo que auto-fit
     """
     val = val.strip()
+
     # repeat(N, 1fr)
     m = re.match(r"^repeat\(\s*(\d+)\s*,\s*1fr\s*\)$", val)
     if m:
-        return int(m.group(1))
+        return {"grid-column-count": m.group(1)}
+
     # "1fr 1fr 1fr"
     parts = val.split()
-    if all(p == "1fr" for p in parts) and len(parts) >= 1:
-        return len(parts)
+    if parts and all(p == "1fr" for p in parts):
+        return {"grid-column-count": str(len(parts))}
+
+    # repeat(auto-fit|auto-fill, minmax(Xu, ANY))
+    # Soporta cualquier unidad valida en X y descarta el segundo argumento de minmax
+    # (que tipicamente es 1fr y Oxygen lo asume por default).
+    m = re.match(
+        r"^repeat\(\s*(auto-fit|auto-fill)\s*,\s*minmax\(\s*(-?\d+(?:\.\d+)?)([a-zA-Z%]*)\s*,\s*[^)]+\)\s*\)$",
+        val,
+    )
+    if m:
+        min_num = m.group(2)
+        min_unit = m.group(3) or "px"
+        out: Dict[str, str] = {
+            "grid-columns-auto-fit": "1",
+            "grid-column-min-width": min_num,
+        }
+        if min_unit != "px":
+            out["grid-column-min-width-unit"] = min_unit
+        return out
+
     return None
 
 
@@ -897,9 +1394,6 @@ def html_to_component_tree(html: str, ids: IdAllocator) -> Dict:
     Parsea HTML y construye el arbol de componentes Oxygen.
     Asume que el HTML tiene exactamente UN nodo raiz visible.
     """
-    # Limpiar estado entre ejecuciones
-    _AUTOFLEX_CLASSES_NEEDED.clear()
-
     soup = BeautifulSoup(html, "html.parser")
     # Encontrar el primer Tag (ignorar text nodes / espacios)
     root = None
@@ -917,6 +1411,43 @@ def html_to_component_tree(html: str, ids: IdAllocator) -> Dict:
     return _build_component(root, ids, parent_ct_id=ROOT_CT_PARENT, depth=2)
 
 
+# Mapeo data-aos-* del HTML -> key Oxygen en options.original.
+# El atributo `data-aos` (sin sufijo) mapea a `aos-type`. Los demas son 1-a-1
+# quitando el prefijo `data-`. Todos los valores se pasan como string.
+_DATA_AOS_KEY_MAP = {
+    "data-aos":                  "aos-type",
+    "data-aos-duration":         "aos-duration",
+    "data-aos-easing":           "aos-easing",
+    "data-aos-offset":           "aos-offset",
+    "data-aos-delay":            "aos-delay",
+    "data-aos-anchor":           "aos-anchor",
+    "data-aos-anchor-placement": "aos-anchor-placement",
+    "data-aos-once":             "aos-once",
+}
+
+
+def _extract_aos_options(tag: Tag) -> Dict[str, str]:
+    """Extrae los atributos data-aos-* del tag y los devuelve como dict con las
+    keys nativas de Oxygen (aos-type, aos-duration, etc.). Las keys que devuelva
+    deben sumarse a options.original; las correspondientes data-aos-* deben
+    excluirse de custom-attributes para evitar duplicacion."""
+    if not hasattr(tag, "attrs"):
+        return {}
+    out: Dict[str, str] = OrderedDict()
+    for raw_name, value in tag.attrs.items():
+        lookup = raw_name.lower()
+        if lookup not in _DATA_AOS_KEY_MAP:
+            continue
+        if isinstance(value, list):
+            value = " ".join(str(v) for v in value)
+        elif value is None:
+            value = ""
+        else:
+            value = str(value)
+        out[_DATA_AOS_KEY_MAP[lookup]] = value
+    return out
+
+
 def _extract_custom_attributes(tag: Tag) -> List[Dict[str, str]]:
     """
     Extrae atributos HTML del tag que el skill NO maneja explicitamente en otro lado,
@@ -929,21 +1460,27 @@ def _extract_custom_attributes(tag: Tag) -> List[Dict[str, str]]:
         width, height,
         loading             : <img>
       - xlink:href          : <svg><use>
-    Cualquier otro atributo (aria-*, data-*, role, tabindex, title, lang, dir, name,
-    value, type, for, placeholder, autocomplete, required, disabled, hidden, etc.)
-    se preserva.
+      - data-aos*           : mapeados a las keys aos-* nativas en _extract_aos_options
+    Cualquier otro atributo (aria-*, data-* generales, role, tabindex, title, lang,
+    dir, name, value, type, for, placeholder, autocomplete, required, disabled,
+    hidden, etc.) se preserva.
     """
     HANDLED_ATTRS = {
         "class", "id",
         "href", "target",
         "src", "alt", "srcset", "width", "height", "loading",
         "xlink:href",
+        "style",  # consumido por _parse_inline_style y mergeado en original
     }
     out: List[Dict[str, str]] = []
     if not hasattr(tag, "attrs"):
         return out
     for name, value in tag.attrs.items():
-        if name.lower() in HANDLED_ATTRS:
+        lower_name = name.lower()
+        if lower_name in HANDLED_ATTRS:
+            continue
+        if lower_name in _DATA_AOS_KEY_MAP:
+            # Ya consumido como aos-* nativo; no duplicar.
             continue
         # value puede ser str o list (ej. class siempre es list; pero ya excluimos class)
         # Para otros atributos multi-valor (raros), unir con espacio.
@@ -954,6 +1491,24 @@ def _extract_custom_attributes(tag: Tag) -> List[Dict[str, str]]:
         else:
             value = str(value)
         out.append({"name": str(name), "value": value})
+    return out
+
+
+def _parse_inline_style(style_value: str) -> Dict[str, str]:
+    """Parsea un atributo style="prop: val; prop: val" y devuelve dict de
+    propiedades. Usa tinycss2 para tokenizar (respeta funciones CSS con
+    parentesis y comas internas como calc(), rgb(), var())."""
+    if not style_value or not style_value.strip():
+        return {}
+    decls = tinycss2.parse_declaration_list(
+        style_value, skip_whitespace=True, skip_comments=True
+    )
+    out: Dict[str, str] = OrderedDict()
+    for d in decls:
+        if d.type == "declaration":
+            out[d.lower_name] = tinycss2.serialize(d.value).strip()
+        elif d.type == "error":
+            WARN.add(f"Error en style inline: {d.message}")
     return out
 
 
@@ -975,6 +1530,36 @@ def _build_component(tag: Tag, ids: IdAllocator, parent_ct_id: int, depth: int) 
         and "code-php" in original
     )
     if not is_codeblock_with_html_literal:
+        # Mapear data-aos-* del HTML a las keys aos-* nativas de Oxygen.
+        # El user las edita desde el panel "Effects > Animation on Scroll".
+        aos_opts = _extract_aos_options(tag)
+        if aos_opts:
+            if not isinstance(original, dict):
+                original = OrderedDict()
+            original.update(aos_opts)
+
+        # v3.2: parsear style="..." inline y mergear al options.original del
+        # bloque (no a las clases - eso contaminaria otros bloques que las usen).
+        # El inline tiene prioridad sobre lo que ya estaba en original.
+        inline_style = tag.get("style", "") if hasattr(tag, "get") else ""
+        if inline_style:
+            inline_props = _parse_inline_style(str(inline_style))
+            if inline_props:
+                expanded = expand_shorthands(inline_props)
+                expanded.pop("__states__", None)
+                inline_oxygen, inline_css_decls = convert_properties(expanded, block_type)
+                if inline_oxygen or inline_css_decls:
+                    if not isinstance(original, dict):
+                        original = OrderedDict()
+                    for k, v in inline_oxygen.items():
+                        original[k] = v
+                    if inline_css_decls:
+                        existing = original.get("custom-css", "")
+                        new_css = " ".join(inline_css_decls)
+                        original["custom-css"] = (
+                            (existing + " " + new_css).strip() if existing else new_css
+                        )
+
         custom_attrs = _extract_custom_attributes(tag)
         if custom_attrs:
             # Asegurar que original es dict para poder agregarle la key
@@ -1031,7 +1616,11 @@ def _build_component(tag: Tag, ids: IdAllocator, parent_ct_id: int, depth: int) 
             # Procesar hijos: tags estructurales + text nodes sueltos.
             # Esto resuelve <a><svg></svg> Texto</a>: el "Texto" se vuelve un
             # ct_text_block hermano del icono, en vez de perderse.
+            # Los Comment (subclase de NavigableString) se ignoran para que
+            # <!-- ... --> no genere ct_text_block ruido.
             for child in tag.children:
+                if isinstance(child, Comment):
+                    continue
                 if isinstance(child, Tag):
                     children.append(_build_component(child, ids, parent_ct_id=ct_id, depth=depth + 1))
                 elif isinstance(child, NavigableString):
@@ -1068,17 +1657,22 @@ def _build_loose_text_child(text: str, ids: "IdAllocator", parent_ct_id: int, de
     ])
 
 
-# Clases CSS que se acumularan globalmente para auto-anadir flex.
-# Llave: nombre de clase. Valor: True si ya se proceso (para no dupliticar).
-_AUTOFLEX_CLASSES_NEEDED: Dict[str, bool] = {}
-
-
 def _maybe_add_flex_for_icon_text_link(tag: Tag, options: Dict, classes: List[str]) -> None:
     """
-    Detecta si el <a> tiene patron icono (svg/i) + texto (text node suelto o multiples hijos).
-    Si si, marca la(s) clase(s) del link para auto-anadir display: flex; flex-direction: row; gap: 8;
+    Detecta si el <a> tiene patron icono (svg/i) + texto (text node suelto).
+    Si lo hay, marca el bloque con __needs_auto_flex__=True. La resolucion real
+    se hace en apply_auto_flex_to_links() despues de parsear el CSS, para poder
+    consultar las default_rules de cada clase y decidir si inyectar o no.
+
+    Decision arquitectonica (v3.1): el auto-flex se aplica al options.original
+    del BLOQUE (#selector), no a las clases (.clase). Asi:
+      - solo este link especifico recibe flex,
+      - clases reusables como .btn no quedan contaminadas con flex+row+gap,
+      - el user mantiene control total de las clases para otros contextos.
     """
-    if not classes:
+    if not classes and not tag.get("class"):
+        # Sin clases tampoco aplicamos: el bloque no es identificable de forma
+        # estable y no hay nada que el user pueda editar facilmente.
         return
     has_icon = False
     has_text = False
@@ -1090,12 +1684,8 @@ def _maybe_add_flex_for_icon_text_link(tag: Tag, options: Dict, classes: List[st
         elif isinstance(child, NavigableString):
             if str(child).strip():
                 has_text = True
-    if not (has_icon and has_text):
-        return
-    # Marcar TODAS las clases del link como necesitadas de auto-flex.
-    # En build_classes_block se aplicara el override real.
-    for cls in classes:
-        _AUTOFLEX_CLASSES_NEEDED[cls] = True
+    if has_icon and has_text:
+        options["__needs_auto_flex__"] = True
 
 
 def _maybe_inject_text_child(tag: Tag, ids: "IdAllocator", parent_ct_id: int, depth: int) -> Optional[Dict]:
@@ -1109,6 +1699,8 @@ def _maybe_inject_text_child(tag: Tag, ids: "IdAllocator", parent_ct_id: int, de
     has_inline_tag = False
     has_other_tag = False
     for child in tag.children:
+        if isinstance(child, Comment):
+            continue
         if isinstance(child, NavigableString):
             if str(child).strip():
                 has_text = True
@@ -1336,25 +1928,24 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
             )
 
     # <a>: depende del contenido y de las clases
+    # v3.1: heuristica button mas conservadora. La version previa convertia
+    # cualquier <a class="...btn..."> en ct_link_button, lo que era frecuente y
+    # sorprendia al user (ct_link_button no acepta hijos y aplica estilos de
+    # boton de Oxygen que tapaban los del user). Ahora ct_link_button solo se
+    # emite si la clase contiene el opt-in explicito 'is-oxy-button'. Para todo
+    # lo demas, <a> con solo texto -> ct_link_text, <a> con hijos -> ct_link.
     if name == "a":
         classes = tag.get("class", [])
-        text_lower = " ".join(classes).lower()
-        # Heuristica: si tiene clase con "boton", "btn", "button" -> link_button
-        is_button = any(re.search(r"\b(boton|button|btn)\b", c.lower()) for c in classes)
-        # Si tiene hijos Tag (no solo texto) -> link wrapper
+        is_button = any(c.lower() == "is-oxy-button" for c in classes)
         has_tag_children = any(isinstance(c, Tag) for c in tag.children)
+        url = tag.get("href", "")
+        target = tag.get("target", "")
         if is_button and not has_tag_children:
-            url = tag.get("href", "")
-            target = tag.get("target", "")
             return ("ct_link_button", _strip_empty({"url": url, "target": target}))
         if has_tag_children:
-            url = tag.get("href", "")
-            target = tag.get("target", "")
             original = _strip_empty({"url": url, "target": target})
             return ("ct_link", original if original else {})
         # Solo texto
-        url = tag.get("href", "")
-        target = tag.get("target", "")
         original = _strip_empty({"url": url, "target": target})
         return ("ct_link_text", original if original else {})
 
@@ -1388,12 +1979,21 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
         return ("ct_text_block", {"useCustomTag": "true", "tag": "button"})
 
     # <img>: ct_image
+    # Emitimos como image_type="1" (URL-based) en vez de image_type="2" (Media Library)
+    # porque Oxygen, con image_type=2 + attachment_id=0, intenta renderizar el src
+    # de placeholder ('src' vacio) y la imagen no aparece. Con image_type=1 + src + alt
+    # la imagen renderiza inmediatamente; el usuario puede reasignar a media library
+    # luego desde el panel si quiere.
     if name == "img":
         src = tag.get("src", "")
+        alt = tag.get("alt", "")
         original: Dict[str, Any] = OrderedDict()
-        original["image_type"] = "2"
-        original["attachment_size"] = "full"
-        original["attachment_id"] = 0
+        original["image_type"] = "1"
+        original["src"] = src
+        if alt:
+            original["alt"] = alt
+        # width/height de los atributos HTML se preservan como hint visual de Oxygen.
+        # Oxygen igual los usa para calcular aspect ratio si la imagen no carga.
         if tag.get("width"):
             try:
                 original["attachment_width"] = int(tag.get("width"))
@@ -1404,10 +2004,11 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
                 original["attachment_height"] = int(tag.get("height"))
             except ValueError:
                 pass
-        original["attachment_url"] = src
-        if tag.get("alt"):
-            WARN.add(f"<img alt=\"{tag.get('alt')}\"> no se transfiere al JSON; reasigna manualmente tras pegar.")
-        WARN.add(f"<img src=\"{src}\"> emitido con attachment_id=0. Reasigna la imagen al media library de WordPress tras pegar.")
+        WARN.add(
+            f"<img src=\"{src}\"> emitido como image_type=1 (URL). "
+            f"Renderiza inmediatamente. Si queres asignar a la media library de WordPress, "
+            f"reasignalo desde el panel de Oxygen tras pegar."
+        )
         return ("ct_image", original)
 
     # Tags de tipo div con tag custom
@@ -1467,6 +2068,57 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
     if name == "div":
         return ("ct_div_block", {})
 
+    # ============================================================
+    # v3.2: tags HTML adicionales mapeados con useCustomTag
+    # ============================================================
+
+    # Tags estructurales (contenedores puros): siempre ct_div_block.
+    # Cubre tablas (sin <td>/<th>/<caption>/<legend>/<figcaption> que usan trio),
+    # forms (sin <label>), y otros block-level que aceptan hijos arbitrarios.
+    PURE_CONTAINER_TAGS = {
+        "table", "thead", "tbody", "tfoot", "tr", "colgroup",
+        "form", "fieldset", "select",
+        "blockquote", "pre",
+    }
+    if name in PURE_CONTAINER_TAGS:
+        return ("ct_div_block", {"useCustomTag": "true", "tag": name})
+
+    # Tags VOID (sin contenido). Oxygen igual los emite con useCustomTag pero los
+    # hijos quedan vacios. Los atributos del tag (type, name, value, placeholder,
+    # required, etc.) viajan como custom-attributes editables.
+    VOID_TAGS = {"input", "hr", "col", "br"}
+    if name in VOID_TAGS:
+        if name == "br":
+            # <br> dentro de inline mixto se preserva en el HTML del oxy_rich_text
+            # padre. Como nodo independiente es raro pero igual lo soportamos.
+            WARN.add(f"<br> como nodo independiente es poco comun; se emite como ct_div_block vacio con tag=br.")
+        return ("ct_div_block", {"useCustomTag": "true", "tag": name})
+
+    # Tags con trio (estructural -> div, inline mixto -> rich text, texto -> text):
+    # paralelo al manejo de <li> y <button>. Conserva la semantica del tag externo
+    # y elige el bloque interno segun el contenido real.
+    TRIO_TAGS = {
+        "td", "th", "caption",       # tabla: celdas y caption
+        "label", "legend",           # forms: labels
+        "figcaption", "summary",     # otros: caption/summary
+        "option", "code",            # inline texto (option en select, code standalone)
+        "textarea",                  # textarea acepta texto pero no HTML inline
+    }
+    if name in TRIO_TAGS:
+        inline_set = {"em", "strong", "span", "small", "br", "i", "b", "u", "code", "a"}
+        structural_children = [
+            c for c in tag.children
+            if hasattr(c, "name") and c.name and c.name not in inline_set
+        ]
+        if structural_children:
+            return ("ct_div_block", {"useCustomTag": "true", "tag": name})
+        if _has_inline_children_with_text(tag):
+            return ("oxy_rich_text", {"useCustomTag": "true", "tag": name})
+        non_text_children = [c for c in tag.children if hasattr(c, "name") and c.name]
+        if non_text_children and all(c.name in inline_set for c in non_text_children):
+            return ("oxy_rich_text", {"useCustomTag": "true", "tag": name})
+        return ("ct_text_block", {"useCustomTag": "true", "tag": name})
+
     # Tag desconocido
     WARN.add(f"Tag <{name}> no mapeado a un tipo de bloque conocido. Tratado como ct_div_block. Verifica el resultado.")
     return ("ct_div_block", {})
@@ -1518,7 +2170,6 @@ def build_classes_block(default_rules: Dict, media_rules: Dict, used_classes: Li
 
     for cls in relevant:
         block_type = class_to_block_type.get(cls)
-        custom_tag = class_to_tag.get(cls)
         cls_obj: Dict[str, Any] = OrderedDict()
 
         # Default
@@ -1529,28 +2180,11 @@ def build_classes_block(default_rules: Dict, media_rules: Dict, used_classes: Li
         oxygen_props, custom_css_decls = convert_properties(default_props, block_type)
         if custom_css_decls:
             oxygen_props["custom-css"] = " ".join(custom_css_decls)
-        # Si la clase pertenece a un bloque con tag custom, emitir el tag en original
-        # tambien (visto en JSON real de Oxygen)
-        if custom_tag:
-            new_original = OrderedDict()
-            new_original["tag"] = custom_tag
-            new_original.update(oxygen_props)
-            oxygen_props = new_original
+        # v3.1: NO inyectamos el `tag` del bloque dentro del original de la clase.
+        # `tag` es una opcion del bloque (options.original.tag), no de la clase.
+        # Inyectarlo aqui forzaria el mismo tag a cualquier otro bloque que use
+        # la misma clase, lo que es incorrecto.
         cls_obj["original"] = oxygen_props if oxygen_props else {}
-
-        # Auto-flex para clases de <a> con icono+texto (postura A confirmada).
-        # Solo se anade si el usuario no escribio esas propiedades en su CSS.
-        if _AUTOFLEX_CLASSES_NEEDED.get(cls):
-            orig = cls_obj["original"]
-            if not isinstance(orig, dict):
-                orig = OrderedDict()
-                cls_obj["original"] = orig
-            if "display" not in orig:
-                orig["display"] = "flex"
-            if "flex-direction" not in orig and orig.get("display") == "flex":
-                orig["flex-direction"] = "row"
-            if "gap" not in orig:
-                orig["gap"] = "8"
 
         # Auto-icon-size para clases aplicadas a ct_fancy_icon.
         # ct_fancy_icon renderiza como <div class="ct-fancy-icon"><svg></svg></div>.
@@ -1954,6 +2588,46 @@ def build_inner_style_block(
     ])
 
 
+def apply_auto_flex_to_links(node: Dict, default_rules: Dict[str, Dict]) -> None:
+    """
+    Recorre el arbol y, para cada bloque marcado con __needs_auto_flex__,
+    inyecta display:flex / flex-direction:row / gap:8 en options.original SI
+    ninguna de las clases del bloque ya definio `display` en el CSS del user.
+
+    Si el user ya configuro un display (flex, grid, block, etc.) en una de las
+    clases del link, respetamos su intencion y NO inyectamos. Esto evita romper
+    layouts donde el user eligio grid u otra opcion para el container.
+
+    Despues de procesar, eliminamos la marca interna __needs_auto_flex__ para
+    que no aparezca en el JSON final.
+    """
+    if not isinstance(node, dict):
+        return
+    opts = node.get("options", {})
+    if opts.get("__needs_auto_flex__"):
+        del opts["__needs_auto_flex__"]
+        classes = opts.get("classes", []) or []
+        user_defined_display = any(
+            "display" in (default_rules.get(c, {}) or {})
+            for c in classes
+        )
+        if not user_defined_display:
+            original = opts.get("original")
+            if not isinstance(original, dict):
+                # Esta vacio (puede ser [] tras normalizacion, o no presente).
+                # Reemplazar por dict para poder inyectar.
+                original = OrderedDict()
+                opts["original"] = original
+            if "display" not in original:
+                original["display"] = "flex"
+            if "flex-direction" not in original:
+                original["flex-direction"] = "row"
+            if "gap" not in original:
+                original["gap"] = "8"
+    for child in node.get("children", []) or []:
+        apply_auto_flex_to_links(child, default_rules)
+
+
 def _normalize_original_empty_to_array(node: Dict) -> None:
     """
     Recorre el arbol de componentes y reemplaza `options.original = {}` por `[]`.
@@ -2065,6 +2739,12 @@ def main():
             component_tree["children"] = []
         component_tree["children"].append(code_block)
         WARN.add(f"Se agrego un ct_code_block (id={code_block['id']}) con CSS no mapeable. Revisa que el resultado sea el esperado.")
+
+    # v3.1: aplicar auto-flex a los bloques ct_link con icono+texto. Se hace aqui,
+    # despues de tener default_rules parseado, para poder decidir si el user ya
+    # configuro display y respetarlo. La inyeccion va al options.original del
+    # bloque (no a las clases) para no contaminar clases reusables.
+    apply_auto_flex_to_links(component_tree, default_rules)
 
     # Ensamblar JSON final
     output = OrderedDict()

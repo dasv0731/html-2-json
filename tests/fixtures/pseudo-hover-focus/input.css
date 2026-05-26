@@ -1,0 +1,17 @@
+.navLink__item {
+  color: #333333;
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.navLink__item:hover {
+  color: #2563eb;
+  background-color: #f3f4f6;
+}
+
+.navLink__item:focus {
+  color: #1d4ed8;
+  background-color: #e5e7eb;
+}

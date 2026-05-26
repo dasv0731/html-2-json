@@ -30,8 +30,10 @@ El skill incorpora detección automática de los siguientes patrones, descubiert
 
 **Iconos (3 rutas, evaluadas en este orden):**
 - **Ruta A — `ct_fancy_icon` nativo**: detecta `<svg><use xlink:href="#XxxIcon-nombre"></use></svg>` y lo emite como `ct_fancy_icon` con `original.icon-id`. Es el patrón que usa Oxygen para iconos de FontAwesome 4 antiguo, Lineaicons, y otros sets cargados como sprites SVG.
-- **Ruta B — `ct_code_block` con FA 6+**: detecta `<i class="fa-solid fa-XXX">`, `<i class="fa-brands fa-XXX">`, `<i class="fas fa-XXX">` y similares. Lo emite como `ct_code_block` con `original.code-php = "<i class=\"...\"></i>"` y `unwrap: true`. Soporta sintaxis FA 4/5/6.
+- **Ruta B — `ct_code_block` con FA 6+**: detecta `<i class="fa-solid fa-XXX">`, `<i class="fa-brands fa-XXX">`, `<i class="fas fa-XXX">` y similares. Lo emite como `ct_code_block` con `original.code-php = "<i class=\"...\"></i>"` y `unwrap: true`. Las clases FA del wrapper (`fa-solid`, `fa-brands`, `fa-XXX`) se filtran de `options.classes` del bloque porque ya viajan en `code-php` (evita ensuciar la tabla global de selectores). Las clases del usuario (no-FA) sí se preservan. Soporta sintaxis FA 4/5/6.
 - **Ruta C — `ct_code_block` con SVG inline**: cualquier SVG inline crudo (con `<path>`, `<ellipse>`, etc.) que no matchee Ruta A. Se emite como `ct_code_block` con el SVG completo en `code-php`, `unwrap: true`. Avisa al usuario.
+
+**Aclaración sobre cuándo aplica la Ruta B**: la Ruta B se gatilla cuando el `<i class="fa-...">` se procesa como componente independiente. Si el `<i>` vive dentro de un `<div>` u otro wrapper cuyos hijos son **todos** inline (texto + tags inline como `<i>`, `<em>`, `<span>`), el detector de rich text del padre lo absorbe primero y los iconos terminan dentro de un `oxy_rich_text` con HTML literal en `ct_content`. Funcionalmente se renderizan igual (las clases FA siguen disparando los glifos), pero pierden la editabilidad como bloque independiente. Para forzar Ruta B, dejá el `<i>` como root del HTML o ponele al menos un hermano block-level dentro del wrapper. Ambos comportamientos están cubiertos por fixtures (`icono-fa6-codeblock` y `icono-fa6-absorbido-richtext`).
 
 **Inyección de texto en divs**: cuando un `<div class="X">texto</div>` o un `<a class="X">texto <em>x</em></a>` tiene contenido textual, el skill inyecta automáticamente:
 - Un `ct_text_block` hijo si el contenido es texto plano puro.
@@ -45,7 +47,7 @@ ct_link [clases-del-link]
 └── ct_text_block "texto"
 ```
 
-**Auto-flex en links con icono + texto**: cuando se detecta el patrón anterior, el skill añade automáticamente a las clases del link `display: flex`, `flex-direction: row`, `gap: 8` (solo si no estaban en el CSS). Esto resuelve que el icono y el texto aparezcan en columna en lugar de fila. **Limitación conocida**: actualmente el auto-flex se aplica a TODAS las clases del link, no solo a la modifier. Bug pendiente.
+**Auto-flex en links con icono + texto**: cuando se detecta el patrón anterior, el skill añade automáticamente a la **última clase** del link `display: flex`, `flex-direction: row`, `gap: 8` (solo si no estaban en el CSS). Esto resuelve que el icono y el texto aparezcan en columna en lugar de fila. Convención BEM: la última clase es típicamente la modifier (`btn btn--whatsapp` → `.btn--whatsapp`), y aplicar solo ahí evita contaminar la clase base que puede usarse en otros `<a>` sin icono. Si el link tiene más de una clase, se emite un WARN avisando dónde se aplicó el auto-flex para que el usuario verifique o reordene.
 
 **Auto-`icon-size` en `ct_fancy_icon`**: el wrapper div de `ct_fancy_icon` recibe `width`/`height` de la clase, pero el SVG interno NO los respeta — usa `icon-size` (propiedad propia de Oxygen). Cuando una clase con `width` o `height` se aplica a un `ct_fancy_icon`, el skill emite también `icon-size` automáticamente con el valor de `width` (o `height` si solo hay height).
 
@@ -89,6 +91,7 @@ El input es estricto. Si el HTML/CSS no cumple, NO ejecutes el script: dile al u
 
 ### CSS
 - **Una regla por clase**. Selectores complejos con combinadores (`.foo > .bar`, `.foo + .bar`, `.foo .bar`, `[data-x]`, etc.) van automáticamente al Code Block agregado.
+- **Sin selectores globales del sitio**: `:root`, `*`, `*::before`, `*::after`, `html`, `body`, `a`, `p`, `img`, `h1-h6`, etc. (tag puros sin clase) se **omiten** con WARN. Razón: si llegaran al Code Block del bloque reusable, romperían estilos del template/page al pegar. Si necesitás esos estilos en el componente, **migrá las reglas a una clase específica** (ej. `.miBloque__base { ... }`) y aplicá la clase al HTML. Lo mismo para variables CSS: en lugar de `:root { --c-red: ... }`, definí las vars sobre la clase base del componente.
 - **Pseudo-clases y pseudo-elementos soportados como states nativos** (ver tabla más abajo). Las no listadas van al Code Block.
 - **Media queries con `max-width`** se mapean a breakpoints nativos de Oxygen. Las que usan `min-width` o cualquier otra forma van al Code Block con WARN — el skill NO rechaza el input, solo avisa.
 - **Breakpoints aceptados** (con tolerancia ±1px):
@@ -127,6 +130,59 @@ Para `:before` y `::after`, el valor de `content` se normaliza quitando comillas
 - Cualquier otra pseudo-clase no listada arriba
 - Selectores con combinadores (`.foo > .bar`, `.foo .bar`, `.foo + .bar`)
 - Selectores con `[atributo]`
+
+### CSS Grid: reglas para mapeo nativo
+
+Oxygen Grid es más limitado que CSS Grid estándar. El skill mapea a propiedades nativas SI Y SOLO SI:
+
+| Propiedad CSS | Mapeo Oxygen | Condición |
+|---|---|---|
+| `display: grid` | `display: grid` | Siempre |
+| `grid-template-columns: repeat(N, 1fr)` o `1fr 1fr ... 1fr` (N iguales) | `grid-column-count: N` | Solo columnas de ancho uniforme |
+| `gap: X` o `gap: X Y` (en grid container) | `grid-row-gap: X` + `grid-column-gap: Y` | El skill descompone automáticamente cuando el container es `display: grid` |
+| `grid-column: span N` en un hijo | entrada con `column-span: "N"` en `grid-child-rules` del container | El hijo necesita una clase única donde declarar el span |
+| `grid-row: span N` en un hijo | entrada con `row-span: "N"` en `grid-child-rules` del container | Igual |
+
+**Cómo escribir el CSS para que el skill genere `grid-child-rules` correctamente:**
+
+```css
+/* Container */
+.gridA { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+
+/* Hijos por clase modifier (BEM) */
+.gridA__cell--wide { grid-column: span 2; }
+.gridA__cell--tall { grid-row: span 2; }
+.gridA__cell--big  { grid-column: span 3; grid-row: span 2; }
+```
+
+```html
+<div class="gridA">
+  <div class="gridA__cell"></div>                          <!-- 1×1 default -->
+  <div class="gridA__cell gridA__cell--big"></div>         <!-- 3×2 -->
+  <div class="gridA__cell gridA__cell--wide"></div>        <!-- 2×1 -->
+  <div class="gridA__cell gridA__cell--tall"></div>        <!-- 1×2 -->
+  <div class="gridA__cell"></div>                          <!-- 1×1 default -->
+</div>
+```
+
+El skill consulta las clases de cada hijo del grid en orden posicional. Para hijos con varias clases (BEM base + modifier), mergea spans desde todas. Si ninguna clase del hijo declara span, queda como `column-span: "", row-span: ""` (1×1).
+
+**Lo que va a `custom-css` (no soportado nativo):**
+
+- `grid-template-columns: 1fr 2fr 1fr` y similares (anchos desiguales) — Oxygen Grid no acepta proporciones desiguales.
+- `grid-template-columns: 200px 1fr` (mezcla unidades) — idem.
+- `grid-template-rows` con valores explícitos.
+- `grid-template-areas`.
+- `grid-column: 2 / 4` (posicionamiento absoluto start/end) — usá `span N` en su lugar.
+- `grid-area: foo`.
+- `grid-row: N / M`.
+- `grid-auto-flow`, `grid-auto-rows`, `grid-auto-columns`.
+
+**Limitaciones del mapeo actual:**
+
+- Si querés que el array `grid-child-rules` también se emita en breakpoints, escribí las spans dentro del media query con clases dedicadas. El skill **no replica automáticamente** el array de top-level a cada breakpoint hoy.
+- Si un grid container tiene hijos sin clase (`<div></div>` desnudo), reciben `column-span: "", row-span: ""` (default 1×1).
+- Hijos inyectados por el detector de rich text (caso raro en grids) podrían descuadrar los índices del array. Si tu grid contiene texto suelto, usá divs intermedios.
 
 ### Regla operativa: clases únicas por componente
 
@@ -167,10 +223,31 @@ Sé honesto con el usuario sobre estas:
 - **CSS Grid con anchos desiguales** (`grid-template-columns: 1fr 2fr 1fr`): Oxygen Grid solo soporta columnas iguales. Las proporciones desiguales van al `custom-css` o al Code Block. Avisar.
 - **`flex-basis`**: no soportado nativamente en Oxygen. Va a `custom-css`.
 - **`flex-direction: row-reverse` / `column-reverse`**: se descomponen en `flex-direction` + `flex-reverse: reverse` (propiedad propia de Oxygen).
-- **`display: grid` con posicionamiento por `grid-area` o `grid-column: 2 / 4`**: Oxygen Grid usa un modelo distinto (`grid-child-rules` con `column-span` / `row-span`). El skill traduce span simples; posicionamiento absoluto va al `custom-css` o al Code Block.
+- **`display: grid` con posicionamiento por `grid-area` o `grid-column: 2 / 4`**: Oxygen Grid usa un modelo distinto (`grid-child-rules` con `column-span` / `row-span`). El skill traduce `grid-column: span N` y `grid-row: span N` automáticamente al array `grid-child-rules` del container (ver "Generación automática de `grid-child-rules`" más abajo). Otras formas de posicionamiento (`grid-area: foo`, `grid-column: 2 / 4`) van al `custom-css` o al Code Block.
+
+### Generación automática de `grid-child-rules`
+
+Cuando un container `display: grid` tiene hijos con `grid-column: span N` y/o `grid-row: span N` en sus clases, el skill construye automáticamente el array `grid-child-rules` (formato propio de Oxygen) en el container.
+
+Formato emitido (validado empíricamente contra JSONs reales de Oxygen):
+```json
+"grid-child-rules": [
+  {"child-index": 0, "column-span": "",  "row-span": ""},   // default 1x1
+  {"child-index": 1, "column-span": "3", "row-span": "2"},  // 3 cols x 2 rows
+  {"child-index": 2, "column-span": "2", "row-span": ""},   // 2 cols, row default
+  {"child-index": 3, "column-span": "",  "row-span": "2"},  // col default, 2 rows
+  {"child-index": 4, "column-span": "1", "row-span": "1"}   // 1x1 explícito
+]
+```
+
+Reglas:
+- Una entrada por hijo (NO se trunca al último no-default).
+- Hijos sin span declarado: `column-span: ""`, `row-span: ""` (Oxygen los interpreta como 1×1).
+- Solo se emite el array si **al menos un hijo tiene span ≠ default** (evita ruido en grids puros 1×1).
+- Las clases del hijo pueden distribuir spans (`.item--wide` aporta `column-span`, `.item--tall` aporta `row-span`). El skill mergea desde todas las clases del hijo.
+- `grid-column: span N` y `grid-row: span N` se extraen de `custom-css` y no aparecen ahí — viven solo en el array.
 - **`<ul>` y `<li>`**: mapeo semántico con `useCustomTag`. `<ul>/<ol>` → `ct_div_block` con `useCustomTag: true, tag: ul/ol`. `<li>` con texto plano → `ct_text_block[li]`. `<li>` con HTML inline mixto (incluyendo `<a>`, `<em>`, `<strong>`, `<br>`) → `oxy_rich_text[li]` con contenido inline directo (sin `<p>` envolvente). `<li>` con tags estructurales hijos (div, h1-h6, ul anidado) → `ct_div_block[li]`. Validado contra exports reales de Oxygen.
-- **Bug pre-existente en media queries**: en algunos casos un media query puede emitir `display: grid` espurio que no estaba en el CSS original. Bug conocido pendiente.
-- **Bug auto-flex en múltiples clases**: cuando un link tiene varias clases (`btn btn--whatsapp btn--sm`), el auto-flex se aplica a TODAS las clases en lugar de solo a la modifier. Si alguna clase se reutiliza en otro contexto sin icono, recibe flex erróneamente. Workaround: usar clases únicas por componente. Fix del skill pendiente.
+- **Inyección de display en media queries (asimétrica entre flex y grid)**: cuando un breakpoint tiene `flex-direction`/`flex-wrap`/`justify-content` y la clase top-level es `display: flex`, el skill inyecta `display: flex` en ese breakpoint para que el panel UI de Oxygen muestre los controles flex. Para grid NO se hace lo paralelo: el `display: grid` de top-level se hereda en cascada CSS y emitirlo en cada breakpoint generaba ruido al editar (era el "bug del display:grid espurio"). Si necesitas display:grid explícito en un breakpoint, escribilo en tu CSS.
 - **`<button>` HTML: mapeo por trío según contenido** (paralelo a `<li>`):
   - `<button>Texto plano</button>` → `ct_text_block` con `useCustomTag: true, tag: "button"`.
   - `<button>Texto <em>inline mixto</em></button>` → `oxy_rich_text` con `useCustomTag: true, tag: "button"`.

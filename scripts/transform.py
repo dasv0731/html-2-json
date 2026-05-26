@@ -107,7 +107,7 @@ NATIVE_PROPERTIES = {
     "display", "flex-direction", "flex-wrap", "justify-content", "align-items",
     "align-content", "align-self", "flex-grow", "flex-shrink", "flex-reverse",
     "column-gap", "row-gap", "gap", "grid-column-gap", "grid-row-gap",
-    "grid-column-count", "grid-child-rules",
+    "grid-column-count", "grid-child-rules", "grid-column-min-width-unit",
     "position", "top", "right", "bottom", "left", "z-index",
     "overflow", "overflow-x", "overflow-y",
     # Espaciado
@@ -270,6 +270,45 @@ def _parse_media_prelude(prelude) -> Optional[str]:
     return None
 
 
+def _is_global_selector(sel: str) -> bool:
+    """
+    Detecta selectores que aplican globalmente al sitio destino (no a clases
+    locales del componente). Estos selectores NO deben llegar al code-block
+    porque al pegar el bloque reusable, romperian estilos del template/page.
+
+    Casos detectados:
+      - :root, :root::before, etc.
+      - * (universal), *::before, *::after, *,*::before,*::after
+      - Tag puros sin clase: body, html, a, p, img, h1-h6, div, span, etc.
+      - Tag con pseudo-elemento: body::before, a:hover, etc.
+
+    Conserva como NO global (deben pasar al flujo normal):
+      - .clase, .clase:hover, .clase::before
+      - Selectores complejos con clase (.foo .bar) -> Code Block normal
+    """
+    s = sel.strip()
+    if not s:
+        return False
+    # :root y variantes
+    if s == ":root" or s.startswith(":root:") or s.startswith(":root::"):
+        return True
+    # Universal *
+    if s == "*" or s.startswith("*:") or s.startswith("*::"):
+        return True
+    # Si contiene clase o ID, NO es global
+    if "." in s or "#" in s:
+        return False
+    # Si contiene atributo, combinador, etc., dejar al flujo normal (code-block)
+    if any(c in s for c in ("[", ">", "+", "~", " ")):
+        return False
+    # Tag puro (con o sin pseudo): body, body:hover, html, a, p::before, etc.
+    # Extraer el tag base (antes de cualquier `:`)
+    tag_part = s.split(":", 1)[0]
+    if tag_part and tag_part.replace("-", "").isalpha():
+        return True
+    return False
+
+
 def _process_qualified_rule(rule, default_rules, default_state_rules, codeblock_rules, breakpoint=None, media_rules=None):
     """Procesa una regla qualified-rule y la enruta segun el selector."""
     selector_text = tinycss2.serialize(rule.prelude).strip()
@@ -278,6 +317,18 @@ def _process_qualified_rule(rule, default_rules, default_state_rules, codeblock_
     # Determinar tipo de selector
     selectors = [s.strip() for s in selector_text.split(",")]
     for sel in selectors:
+        # Selectores globales del sitio (`:root`, tag puros como body/html/a/p/img/*,
+        # universal con pseudo). Si los emitiramos al code-block del bloque reusable,
+        # afectarian a TODA la pagina al pegarlo (rompen estilos del template). Los
+        # omitimos con WARN claro: el usuario debe migrar a clases especificas si
+        # necesita esos estilos en el componente.
+        if _is_global_selector(sel):
+            WARN.add(
+                f"Selector global '{sel}' omitido (rompe el sitio destino al pegar). "
+                f"Migra esas reglas a una clase especifica del componente "
+                f"(ej. `.miBloque__base`) y aplica la clase al HTML."
+            )
+            continue
         target = _classify_selector(sel)
         if target is None:
             # Selector complejo -> Code Block
@@ -299,6 +350,9 @@ def _process_qualified_rule(rule, default_rules, default_state_rules, codeblock_
             if state is None:
                 if cls not in default_rules:
                     default_rules[cls] = {}
+                # Extraer grid-column/grid-row span N como metadata especial
+                # para que el post-process construya grid-child-rules en el container.
+                declarations = _extract_grid_span_metadata(declarations)
                 default_rules[cls].update(declarations)
             else:
                 if cls not in default_state_rules:
@@ -320,6 +374,32 @@ def _process_qualified_rule(rule, default_rules, default_state_rules, codeblock_
                 if state not in media_rules[cls][breakpoint]["__states__"]:
                     media_rules[cls][breakpoint]["__states__"][state] = {}
                 media_rules[cls][breakpoint]["__states__"][state].update(declarations)
+
+
+def _extract_grid_span_metadata(declarations: Dict[str, str]) -> Dict[str, str]:
+    """
+    Si una regla CSS de clase tiene `grid-column: span N` o `grid-row: span N`,
+    extraerlas a metadata especial (__grid_span_column__, __grid_span_row__) y
+    quitarlas del dict de declaraciones normales. El post-process apply_grid_child_rules
+    las usa para construir el array `grid-child-rules` en el container grid.
+
+    Solo aplica al formato `span N` (donde N es entero >= 1). Otras formas
+    (`grid-column: 2/4`, `grid-area: foo`) no se tocan y caen a custom-css por el
+    flujo normal.
+    """
+    out = dict(declarations)
+    span_re = re.compile(r"^\s*span\s+(\d+)\s*$")
+    if "grid-column" in out:
+        m = span_re.match(out["grid-column"])
+        if m:
+            out["__grid_span_column__"] = m.group(1)
+            del out["grid-column"]
+    if "grid-row" in out:
+        m = span_re.match(out["grid-row"])
+        if m:
+            out["__grid_span_row__"] = m.group(1)
+            del out["grid-row"]
+    return out
 
 
 def _strip_content_quotes(value: str) -> str:
@@ -448,6 +528,10 @@ def expand_shorthands(props: Dict[str, str]) -> Dict[str, str]:
     for prop, val in props.items():
         # __states__ es metadata interna (dict de states); se preserva al final, no se procesa aqui.
         if prop == "__states__":
+            continue
+        # __grid_span_* es metadata para grid-child-rules; el post-process la consume,
+        # no debe llegar al output normal.
+        if prop in ("__grid_span_column__", "__grid_span_row__"):
             continue
         if prop in ("padding", "margin"):
             out.update(_expand_box(prop, val))
@@ -725,9 +809,18 @@ def convert_properties(props: Dict[str, str], block_type: Optional[str] = None) 
     for prop, val in props.items():
         if prop == "__states__":
             continue
+        # Metadata interna de spans (consumida por apply_grid_child_rules en otra fase).
+        if prop in ("__grid_span_column__", "__grid_span_row__"):
+            continue
         if prop.startswith("__custom_css__"):
             real_prop = prop.replace("__custom_css__", "")
             custom_css.append(f"{real_prop}: {val};")
+            continue
+
+        # Caso especial: grid-child-rules es un array de objetos, no un string.
+        # Emitirlo tal cual; _is_property_native asume valores string.
+        if prop == "grid-child-rules" and isinstance(val, list):
+            oxygen[prop] = val
             continue
 
         # Caso especial: grid-template-columns -> grid-column-count si es repeat(N, 1fr) o N veces 1fr
@@ -778,12 +871,20 @@ def convert_properties(props: Dict[str, str], block_type: Optional[str] = None) 
 def _is_property_native(prop: str, val: str) -> bool:
     """
     Decide si una propiedad+valor pueden ir nativos a Oxygen.
-    Retorna False si el valor contiene calc(), clamp(), var(), etc.
+    Retorna False si el valor contiene calc(), clamp(), var(), o cualquier
+    funcion gradient (Oxygen tiene un formato propio de objeto estructurado
+    para gradients y no respeta el string CSS en el campo nativo de
+    background-image).
     """
     if prop not in NATIVE_PROPERTIES:
         return False
     # Valores con funciones complejas: van a custom-css
-    if any(fn in val for fn in ("calc(", "clamp(", "min(", "max(", "var(", "env(")):
+    if any(fn in val for fn in (
+        "calc(", "clamp(", "min(", "max(", "var(", "env(",
+        "linear-gradient(", "radial-gradient(", "conic-gradient(",
+        "repeating-linear-gradient(", "repeating-radial-gradient(",
+        "repeating-conic-gradient(",
+    )):
         return False
     return True
 
@@ -1006,6 +1107,13 @@ def _build_component(tag: Tag, ids: IdAllocator, parent_ct_id: int, depth: int) 
 
     # classes
     classes = tag.get("class", [])
+    # Si el bloque es ct_code_block con HTML literal que ya contiene las clases
+    # (Ruta B de iconos FA), filtrar las clases FA del bloque. Ya viajan dentro
+    # del code-php y emitirlas tambien como classes del bloque ensucia la tabla
+    # global de selectores de Oxygen con .fa-solid, .fa-envelope, etc. (clases
+    # de framework, no de usuario, que el usuario no quiere estilizar).
+    if is_codeblock_with_html_literal and classes:
+        classes = [c for c in classes if not _FA_CLASS_PATTERN.match(c) and not c.startswith("fa-")]
     if classes:
         options["classes"] = list(classes)
         options["activeselector"] = classes[-1]
@@ -1092,10 +1200,18 @@ def _maybe_add_flex_for_icon_text_link(tag: Tag, options: Dict, classes: List[st
                 has_text = True
     if not (has_icon and has_text):
         return
-    # Marcar TODAS las clases del link como necesitadas de auto-flex.
-    # En build_classes_block se aplicara el override real.
-    for cls in classes:
-        _AUTOFLEX_CLASSES_NEEDED[cls] = True
+    # Marcar SOLO la ultima clase del link. Convencion BEM: modifier al final
+    # (ej. "btn btn--whatsapp" -> .btn--whatsapp es la modifier que aplica al
+    # contexto especifico icono+texto, .btn es la base reutilizable que no debe
+    # recibir flex inyectado porque puede usarse en otros <a> sin icono).
+    target = classes[-1]
+    _AUTOFLEX_CLASSES_NEEDED[target] = True
+    if len(classes) > 1:
+        WARN.add(
+            f"<a> con icono+texto tiene multiples clases ({' '.join(classes)}). "
+            f"Auto-flex aplicado solo a la ultima ('.{target}'). "
+            f"Si la clase modifier no es esa, reordena las clases o ajusta a mano."
+        )
 
 
 def _maybe_inject_text_child(tag: Tag, ids: "IdAllocator", parent_ct_id: int, depth: int) -> Optional[Dict]:
@@ -1411,7 +1527,7 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
         return ("ct_image", original)
 
     # Tags de tipo div con tag custom
-    if name in ("section", "article", "header", "footer", "aside", "nav", "main"):
+    if name in ("section", "article", "header", "footer", "aside", "nav", "main", "blockquote"):
         return ("ct_div_block", {"tag": name})
 
     # h1-h6
@@ -1432,6 +1548,14 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
 
     # span y otros tags inline
     if name in ("span", "em", "strong", "small"):
+        # Si el tag esta vacio (sin texto ni hijos), tratarlo como div decorativo
+        # con useCustomTag. Asi el panel de Oxygen no muestra "Text Content"
+        # editable para algo que no es texto (ej. <span class="dot" aria-hidden></span>
+        # usado como punto decorativo o separador visual).
+        has_text = bool(tag.get_text(strip=True))
+        has_tag_children = any(isinstance(c, Tag) for c in tag.children)
+        if not has_text and not has_tag_children:
+            return ("ct_div_block", {"useCustomTag": "true", "tag": name})
         return ("ct_text_block", {"useCustomTag": "true", "tag": name})
 
     # ul / ol -> ct_div_block con useCustomTag
@@ -1586,10 +1710,10 @@ def build_classes_block(default_rules: Dict, media_rules: Dict, used_classes: Li
                 states_bp = bp_rules.pop("__states__", None) if "__states__" in bp_rules else None
                 expanded = expand_shorthands(bp_rules)
                 bp_oxygen, bp_css = convert_properties(expanded, block_type)
-                # Si hay propiedades de grid o flex, asegurar display
-                if any(p.startswith("grid-") for p in bp_oxygen) and "display" not in bp_oxygen:
-                    if "display" in default_props or "display" in oxygen_props:
-                        bp_oxygen["display"] = "grid"
+                # Si hay propiedades de flex en el breakpoint, asegurar display: flex
+                # para que el panel UI de Oxygen muestre los controles flex en ese breakpoint.
+                # Para grid NO hacemos lo paralelo: el display: grid de top-level se hereda
+                # en cascada CSS y emitirlo en cada breakpoint genera ruido al editar.
                 if any(p in bp_oxygen for p in ("flex-direction", "flex-wrap", "justify-content")) and "display" not in bp_oxygen:
                     if oxygen_props.get("display") == "flex":
                         bp_oxygen["display"] = "flex"
@@ -1954,6 +2078,76 @@ def build_inner_style_block(
     ])
 
 
+def apply_grid_child_rules(node: Dict, default_rules: Dict) -> None:
+    """
+    Post-process: para cada container con `display: grid` en alguna de sus clases,
+    construye el array `grid-child-rules` mirando los hijos en orden.
+
+    Formato canonico de Oxygen (validado empiricamente contra JSONs reales):
+      [
+        {"child-index": 0, "column-span": "",  "row-span": ""},      # hijo default 1x1
+        {"child-index": 1, "column-span": "3", "row-span": "2"},     # hijo 3 cols x 2 rows
+        ...
+      ]
+    Una entrada por cada hijo (NO truncar al ultimo no-default).
+
+    Los spans se detectan via metadata __grid_span_column__ / __grid_span_row__
+    que `_extract_grid_span_metadata` deposita en default_rules al parsear CSS
+    de la forma `grid-column: span N` o `grid-row: span N`.
+
+    El array se inyecta en `default_rules[container_class]["grid-child-rules"]`
+    para que `build_classes_block` lo emita en su lugar natural.
+    """
+    if not isinstance(node, dict):
+        return
+
+    children = node.get("children") or []
+    if children and node.get("name") == "ct_div_block":
+        opts = node.get("options", {})
+        container_classes = opts.get("classes") or []
+        # Encontrar la primera clase del container que sea display: grid
+        grid_class = None
+        for cls in container_classes:
+            rule = default_rules.get(cls, {})
+            if isinstance(rule, dict) and rule.get("display", "").strip().lower() == "grid":
+                grid_class = cls
+                break
+        if grid_class is not None:
+            rules_array = []
+            for i, child in enumerate(children):
+                child_classes = child.get("options", {}).get("classes") or []
+                col_span = ""
+                row_span = ""
+                # Mergear spans desde todas las clases del hijo (modifier puede vivir
+                # en una clase distinta a la base).
+                for ccls in child_classes:
+                    child_rule = default_rules.get(ccls, {})
+                    if isinstance(child_rule, dict):
+                        if "__grid_span_column__" in child_rule and not col_span:
+                            col_span = child_rule["__grid_span_column__"]
+                        if "__grid_span_row__" in child_rule and not row_span:
+                            row_span = child_rule["__grid_span_row__"]
+                rules_array.append({
+                    "child-index": i,
+                    "column-span": col_span,
+                    "row-span": row_span,
+                })
+            # Solo inyectar si al menos un hijo tiene span no-default (evita ruido
+            # en grids puros 1x1 que no necesitan grid-child-rules).
+            if any(r["column-span"] or r["row-span"] for r in rules_array):
+                default_rules[grid_class]["grid-child-rules"] = rules_array
+            # Emitir grid-column-min-width-unit por default para que el grid
+            # no haga overflow horizontal en items intrinsecamente anchos.
+            # Sin esta propiedad, los items grid empujan el contenedor fuera del
+            # viewport cuando el contenido es ancho (descubierto empiricamente).
+            # Solo se inyecta si el usuario no lo definio explicitamente.
+            if "grid-column-min-width-unit" not in default_rules[grid_class]:
+                default_rules[grid_class]["grid-column-min-width-unit"] = "auto"
+
+    for child in children:
+        apply_grid_child_rules(child, default_rules)
+
+
 def _normalize_original_empty_to_array(node: Dict) -> None:
     """
     Recorre el arbol de componentes y reemplaza `options.original = {}` por `[]`.
@@ -2022,6 +2216,11 @@ def main():
 
     # Post-proceso: colapsar wrappers de iconos cuando es seguro
     component_tree = collapse_icon_wrappers(component_tree, default_rules, media_rules)
+
+    # Post-proceso: construir grid-child-rules para containers display:grid cuyos
+    # hijos tienen grid-column/grid-row span N (detectado y guardado como metadata
+    # durante el parseo del CSS).
+    apply_grid_child_rules(component_tree, default_rules)
 
     # Recolectar clases usadas
     class_to_block_type, class_to_tag = collect_used_classes(component_tree)

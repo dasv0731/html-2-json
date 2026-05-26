@@ -1,0 +1,32 @@
+.grid__cell {
+  padding: 8px;
+  background-color: #ffffff;
+}
+
+.grid__cell:first-child {
+  background-color: #fef3c7;
+}
+
+.grid__cell:last-child {
+  background-color: #dbeafe;
+}
+
+.grid__cell:nth-child(2) {
+  background-color: #fce7f3;
+}
+
+.grid__cell:nth-child(2n+1) {
+  color: #111111;
+}
+
+.grid__cell:nth-of-type(odd) {
+  font-weight: 600;
+}
+
+.grid__cell:nth-last-child(1) {
+  border: 1px solid #93c5fd;
+}
+
+.grid__cell:nth-last-of-type(2) {
+  color: #6b21a8;
+}

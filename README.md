@@ -12,11 +12,24 @@ Mapea tags HTML y propiedades CSS a bloques y propiedades nativas de Oxygen (`ct
 ├── CHANGELOG.md                   # Registro de cambios incrementales
 ├── scripts/
 │   └── transform.py               # Script Python determinista que hace la conversión
-└── references/
-    ├── block-types.md             # Tabla HTML tag → tipo de bloque Oxygen
-    ├── property-mappings.md       # Mapeo CSS → propiedades Oxygen, expansión de shorthands
-    └── oxygen-quirks.md           # Anomalías y comportamientos no obvios de Oxygen
+├── references/
+│   ├── block-types.md             # Tabla HTML tag → tipo de bloque Oxygen
+│   ├── property-mappings.md       # Mapeo CSS → propiedades Oxygen, expansión de shorthands
+│   └── oxygen-quirks.md           # Anomalías y comportamientos no obvios de Oxygen
+└── tests/
+    ├── run.py                     # Runner de fixtures (sin frameworks)
+    └── fixtures/<caso>/           # input.html, input.css, options.json, expected.json
 ```
+
+## Tests
+
+```bash
+python tests/run.py              # corre todos los fixtures
+python tests/run.py card-basico  # corre uno solo
+python tests/run.py --update     # regenera expected.json tras cambio deliberado
+```
+
+Cada fixture vive en `tests/fixtures/<caso>/` con cuatro archivos: `input.html`, `input.css`, `options.json` (selector_suffix), y `expected.json` (baseline contra el que se compara byte-a-byte). Si el diff falla, el runner imprime el unified diff JSON pretty-printed.
 
 ## Uso como skill de Claude
 

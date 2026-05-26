@@ -104,17 +104,25 @@ Oxygen Grid es un sistema simplificado:
 
 **Regla aplicada por el script**: ver `property-mappings.md` sección "CSS Grid".
 
-### `display: grid/flex` en breakpoints debe repetirse
+### `display: flex` en breakpoints — sí se repite
 
-Cuando hay propiedades de grid o flex en un breakpoint, Oxygen incluye también `display: grid` o `display: flex` en ese breakpoint, aunque ya esté en `original`.
+Cuando un breakpoint tiene `flex-direction`, `flex-wrap` o `justify-content` y la clase top-level es `display: flex`, Oxygen necesita el `display: flex` también en ese breakpoint para mostrar los controles flex en su panel UI.
 
-**Regla aplicada por el script**: si `media.<bp>.original` tiene cualquier propiedad de flex o grid, también incluir `display`.
+**Regla aplicada por el script**: si `media.<bp>.original` tiene cualquiera de esas propiedades flex y la clase top-level es flex, se inyecta `display: flex` en el breakpoint.
 
-### `grid-child-rules` se repite completo en cada breakpoint
+### `display: grid` en breakpoints — NO se repite (asimetría intencional)
 
-Si el grid cambia en breakpoints (más o menos columnas), el array `grid-child-rules` se repite COMPLETO en cada breakpoint, no como diff.
+A diferencia de flex, el skill **no** repite `display: grid` en cada breakpoint que cambia props de grid. Razón: el `display: grid` de top-level se hereda en cascada CSS y emitirlo en cada breakpoint generaba el "bug del display:grid espurio" (un media query que solo cambiaba `grid-row-gap` recibía un `display: grid` innecesario).
 
-**Regla aplicada por el script**: copiar el array completo a cada breakpoint que tenga propiedades de grid.
+**Si tu grid cambia de comportamiento por breakpoint y necesita `display: grid` explícito**: escribilo en el CSS del media query.
+
+### `grid-child-rules` en breakpoints — limitación actual
+
+Cuando un grid cambia su layout por breakpoint (ej. de 6 columnas en desktop a 1 columna en mobile, o spans distintos), Oxygen espera el array `grid-child-rules` repetido COMPLETO en cada breakpoint (no como diff).
+
+**Hoy el skill NO replica automáticamente el array** desde top-level a los breakpoints. Si necesitás layout grid responsive con spans, escribí explícitamente las clases con sus spans dentro del media query (lo cual tampoco es soportado al 100% — está pendiente).
+
+**Para grid uniforme sin spans** (típicamente cambiar `grid-column-count`), basta con poner la nueva count en el breakpoint y funciona.
 
 ### `gradient` como objeto estructurado
 
@@ -431,21 +439,21 @@ Tras validación empírica, la lista de propiedades nativas en Oxygen es más gr
 
 ## Pendientes técnicos
 
-Bugs y limitaciones conocidas que requieren fix futuro:
+Bugs y limitaciones conocidas vigentes. La lista anterior contenía varios ya resueltos — ver CHANGELOG para historia.
 
-1. **Bug crítico del shorthand con `calc()`, `var()`, `clamp()`, `min()`, `max()`**: `padding: calc(10px + 1vw)` y similares producen output corrupto silenciosamente. El expansor de shorthand hace `split(" ")` sobre el valor y rompe funciones con espacios internos. **Workaround**: escribir las propiedades expandidas manualmente (`padding-top: calc(...); padding-right: ...; ...`).
+1. **`grid-child-rules` en breakpoints**: el array de spans no se replica automáticamente del top-level a cada breakpoint. Para grids con spans que cambian por viewport, el usuario tiene que escribir explícitamente las clases dentro del media query (soporte parcial). Pendiente: decisión sobre si replicar automáticamente o requerir declaración explícita.
 
-2. **Bug del shorthand `border`**: `border: 2px solid green` se expande mal — `border-top-width: green` en lugar de `2px`, color va al campo width. **Workaround**: escribir `border-width`, `border-style`, `border-color` por separado, o las versiones lateralizadas (`border-top-width`, etc.).
+2. **Detector de clases usadas en SVG inline**: cuando un `<svg class="X">` se mapea a `ct_fancy_icon`, la clase `X` puede reportarse como "definida pero no usada en HTML". Falso positivo — la clase sí se aplica al fancy_icon. Pendiente.
 
-3. **Auto-flex en múltiples clases**: cuando un link tiene varias clases, el auto-flex se aplica a TODAS en lugar de solo a la modifier. Ver Workaround 4.
+3. **Variables CSS (`:root`)**: hoy el contrato exige que el usuario expanda manualmente. Decisión pendiente entre: a) resolver `var()` automáticamente a su valor; b) emitir el `:root` en un code block; c) mantener manual y avisar.
 
-4. **Detector de clases usadas falla con SVG inline reemplazado**: cuando un `<svg class="X">` se mapea a `ct_fancy_icon`, la clase `X` puede reportarse como "definida pero no usada en HTML". Falso positivo, la clase sí se aplica al fancy_icon.
+4. **Heurística de `ct_link_button` con BEM `__btn`**: el regex `\b(btn|button|boton)\b` usa word boundary, y `_` es char de palabra. Esto significa que `class="hero__btn"` NO matchea — el `<a>` cae a `ct_link_text` en lugar de `ct_link_button`. Si querés `ct_link_button`, usá guión: `class="hero-btn"`. Pendiente: decisión sobre si extender el regex para reconocer `__btn` o documentar como convención.
 
-5. **Bug `display: grid` espurio en algunos media queries**: en ciertos breakpoints con flex-direction column, el skill emite `display: grid` por error. Pendiente arreglar.
+5. **`<i class="fa-...">` absorbido por wrapper inline**: cuando un FA icon vive como único hijo de un wrapper cuyos hijos son todos inline, el detector de rich text del padre lo absorbe a `oxy_rich_text` en lugar de Ruta B (`ct_code_block` independiente). Funcionalmente equivalente pero pierde editabilidad como bloque. Workaround: el `<i>` debe ser root del HTML o tener al menos un hermano block-level. Documentado en SKILL.md.
 
-6. **Variables CSS (`:root`)**: actualmente el contrato exige que el usuario expanda manualmente. Decisión pendiente entre resolver `var()` automáticamente, emitir el `:root` en un code block, o mantenerlo manual.
+6. **`box-shadow` múltiple**: aparece como NATIVO en el output. Si Oxygen no respeta multi-shadow en su campo nativo, hay que moverlo manualmente a custom-css tras pegar. Pendiente confirmar empíricamente.
 
-7. **`<button>` HTML siempre va a `ct_link_button`**: incluso para botones funcionales (toggle, hamburger, submit) que no son CTAs. Genera un `<a>` con `url=""`. Decisión pendiente sobre cómo distinguir CTAs estilizados de botones funcionales.
+(Resuelto: gradients en `background-image`. Confirmado empíricamente que Oxygen no aplica gradient strings en su campo nativo; ahora todos los `linear-gradient`, `radial-gradient`, `conic-gradient` y sus variantes `repeating-*` van automáticamente a `custom-css`.)
 
 ## Reglas confirmadas que no requieren acción
 

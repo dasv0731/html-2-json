@@ -1,0 +1,43 @@
+.container {
+  padding: 48px;
+  max-width: 1280px;
+}
+
+.container__lead {
+  font-size: 24px;
+  color: #111111;
+  line-height: 1.4;
+}
+
+@media (max-width: 1120px) {
+  .container {
+    padding: 36px;
+  }
+}
+
+@media (max-width: 992px) {
+  .container {
+    padding: 28px;
+  }
+  .container__lead {
+    font-size: 20px;
+  }
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: 20px;
+  }
+  .container__lead {
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding: 16px;
+  }
+  .container__lead {
+    font-size: 16px;
+  }
+}

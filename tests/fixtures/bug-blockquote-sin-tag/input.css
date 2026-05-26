@@ -1,0 +1,17 @@
+.testimonial {
+  padding: 24px;
+  border-left: 4px solid #2563eb;
+  background-color: #f9fafb;
+}
+
+.testimonial__text {
+  font-style: italic;
+  color: #1f2937;
+  margin: 0;
+}
+
+.testimonial__author {
+  font-size: 14px;
+  color: #6b7280;
+  margin-top: 12px;
+}

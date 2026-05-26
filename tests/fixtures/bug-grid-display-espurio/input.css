@@ -1,0 +1,16 @@
+.gallery {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 768px) {
+  .gallery {
+    grid-row-gap: 12px;
+  }
+}
+
+.gallery__item {
+  padding: 12px;
+  background-color: #f3f4f6;
+}

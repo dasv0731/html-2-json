@@ -4,6 +4,37 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-26 — v3.6: fixes derivados de Test-01 (Metalectro blog) post-render
+
+Tres bugs descubiertos al pegar el JSON del primer test integral en Oxygen y observar el render real.
+
+### Bug B (crítico): hijos inline con clase aplanados a oxy_rich_text rompen layout flex
+
+Cuando un container (`<a>`, `<div>`) tenía hijos inline como `<span class="t01__brand-mark">` (con dimensiones/background propios), el skill los aplanaba a un único `oxy_rich_text` con `<p>` envolvente. El layout flex del padre quedaba roto porque los spans ya no eran hijos directos del flex container — eran nietos dentro del `<p>`.
+
+Fix en `_maybe_inject_text_child`: nuevo chequeo `has_classed_inline`. Si CUALQUIER hijo inline (que no sea `<a>`) tiene clase propia, retornar `None` para que cada hijo se procese como bloque editable individual (preserva estructura).
+
+### Bug C (crítico): span/strong/em con SVG hijo perdían el SVG
+
+`<span class="t01__callout-icon"><svg>...</svg></span>` se mapeaba a `ct_text_block` con `useCustomTag: span`. Pero `ct_text_block` solo emite `ct_content` y NO acepta hijos. El SVG desaparecía silenciosamente.
+
+Fix en `_resolve_block_type`: extender el patrón "trío" a `span`/`em`/`strong`/`small`/`b`/`u`/`mark`. Si tienen hijos estructurales → `ct_div_block` (preserva SVG/img). Si tienen HTML inline mixto con texto → `oxy_rich_text`. Texto plano → `ct_text_block` (como antes).
+
+### Bug A (cosmético, CSS inválido): content vacío emitido como `content: ;`
+
+Cuando el inner-style block reserializaba un state `::before`/`::after` con `content: ""`, emitía `content: ;` (sin valor, CSS inválido). El browser descartaba toda la regla → pseudo-elemento decorativo invisible.
+
+Fix con dos helpers nuevos: `_format_content_value()` re-envuelve strings vacíos/sin comillas en comillas dobles; `_serialize_decl()` los aplica a `content`. Las funciones (`attr()`, `counter()`, `url()`, `var()`) y keywords (`none`, `inherit`, etc.) se preservan tal cual.
+
+### Validación
+
+Re-corrido de Test-01 verificado:
+- `.t01__brand` ahora emite 2 children directos (`ct_text_block` para brand-mark, `oxy_rich_text` para brand-word) en lugar de un único rich_text aplanado.
+- `.t01__callout-icon` ahora es `ct_div_block` con un `ct_code_block` hijo conteniendo el SVG.
+- `.t01__brand-mark::after` ahora vive en el state `after` del classes top-level (no en inner-style block, que es donde antes emitía CSS inválido).
+
+---
+
 ## 2026-05-26 — v3.5: tags HTML faltantes detectados en testing real
 
 Fix derivado del primer test integral (blog Metalectro). El test reveló que `<figure>` y `<time>` caían a "Tag desconocido" → `ct_div_block` sin tag, perdiendo la semántica HTML y rompiendo cualquier CSS que apunte a esas clases esperando que sean `<figure>`/`<time>` reales.

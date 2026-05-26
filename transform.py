@@ -1801,11 +1801,18 @@ def _maybe_inject_text_child(tag: Tag, ids: "IdAllocator", parent_ct_id: int, de
     Si el tag contiene SOLO texto plano o texto + tags inline (sin block-level ni svg/i),
     retorna un componente hijo (ct_text_block u oxy_rich_text) que capture ese contenido.
     Si el tag tiene hijos no-inline, retorna None para que el flujo normal procese hijos.
+
+    v3.6: si alguno de los hijos inline tiene `class=`, NO aplanar a rich text.
+    Esas clases suelen tener CSS de layout (width/height/background/display) que se
+    rompe cuando los spans quedan dentro de <p> en lugar de ser hijos directos del
+    flex container padre. En ese caso retornamos None para que cada hijo se procese
+    como bloque editable independiente.
     """
     # Clasificar hijos
     has_text = False
     has_inline_tag = False
     has_other_tag = False
+    has_classed_inline = False  # v3.6
     for child in tag.children:
         if isinstance(child, Comment):
             continue
@@ -1815,6 +1822,10 @@ def _maybe_inject_text_child(tag: Tag, ids: "IdAllocator", parent_ct_id: int, de
         elif isinstance(child, Tag):
             child_name = child.name.lower()
             if child_name in _INLINE_TAGS:
+                # v3.6: tag inline con class propia -> tratar como bloque editable.
+                # No aplica a <a> que ya tiene su propia logica especial (abajo).
+                if child_name != "a" and child.get("class"):
+                    has_classed_inline = True
                 # Excepciones para <a>:
                 # - <a> con hijos Tag (estructural, ej. <a><svg>...</svg></a>)
                 # - <a> con clase (intencionalmente estilable, ej. <a class="nav__link">)
@@ -1831,6 +1842,10 @@ def _maybe_inject_text_child(tag: Tag, ids: "IdAllocator", parent_ct_id: int, de
                 has_other_tag = True
     # Si hay tags no-inline (div, svg, ul, etc), no inyectar.
     if has_other_tag:
+        return None
+    # v3.6: si hay hijos inline con clases propias, no aplanar a rich text.
+    # Cada hijo se vuelve un bloque editable individual (preserva layouts flex).
+    if has_classed_inline:
         return None
     # Si no hay texto en absoluto, no hay nada que inyectar.
     if not has_text and not has_inline_tag:
@@ -2268,7 +2283,20 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
         return ("ct_text_block", {})
 
     # span y otros tags inline
-    if name in ("span", "em", "strong", "small"):
+    # v3.6: aplicar trio (estructural -> div, inline mixto -> rich text, texto -> text)
+    # cuando el span contiene un SVG o img como hijo (caso comun: <span class="icon"><svg/></span>),
+    # ct_text_block ignora hijos y el SVG se pierde. ct_div_block los preserva.
+    if name in ("span", "em", "strong", "small", "b", "u", "mark"):
+        inline_set_for_span = {"em", "strong", "span", "small", "br", "i", "b", "u", "code", "a", "mark"}
+        structural_children = [
+            c for c in tag.children
+            if hasattr(c, "name") and c.name and c.name not in inline_set_for_span
+        ]
+        if structural_children:
+            return ("ct_div_block", {"useCustomTag": "true", "tag": name})
+        if _has_inline_children_with_text(tag):
+            return ("oxy_rich_text", {"useCustomTag": "true", "tag": name})
+        # Texto plano puro o tag vacio
         return ("ct_text_block", {"useCustomTag": "true", "tag": name})
 
     # ul / ol -> ct_div_block con useCustomTag
@@ -2775,6 +2803,39 @@ def collect_rich_text_inner_classes(node: Dict) -> List[str]:
     return found
 
 
+def _format_content_value(val: str) -> str:
+    """Devuelve un valor valido de CSS `content`. El skill normaliza el value
+    de content quitando comillas externas (formato Oxygen). Cuando reserializamos
+    a CSS bruto (inner-style block / code-block), hay que re-envolver en comillas
+    para producir CSS valido. Los formatos no-string de content (attr/counter/url/
+    var/keywords) se dejan tal cual.
+    """
+    if val is None:
+        return '""'
+    v = str(val).strip()
+    if v == "":
+        return '""'
+    if v.startswith('"') or v.startswith("'"):
+        return v  # ya tiene comillas
+    if v.lower() in ("none", "normal", "open-quote", "close-quote",
+                     "no-open-quote", "no-close-quote", "inherit", "initial", "unset"):
+        return v
+    # Functional values
+    if any(v.startswith(fn) for fn in ("attr(", "counter(", "counters(",
+                                        "url(", "var(", "linear-gradient(",
+                                        "radial-gradient(", "image(")):
+        return v
+    # Cualquier otra cosa: string literal. Escapar comillas internas.
+    return '"' + v.replace('"', '\\"') + '"'
+
+
+def _serialize_decl(prop: str, val: str) -> str:
+    """Serializa una declaracion CSS aplicando fix de content para evitar CSS invalido."""
+    if prop == "content":
+        return f"{prop}: {_format_content_value(val)};"
+    return f"{prop}: {val};"
+
+
 def _serialize_css_rules(class_name: str, rules: Dict[str, str]) -> str:
     """
     Serializa un diccionario de propiedades CSS a un string ".clase { prop: val; ... }".
@@ -2784,7 +2845,7 @@ def _serialize_css_rules(class_name: str, rules: Dict[str, str]) -> str:
     for prop, val in rules.items():
         if prop == "__states__":
             continue
-        decls.append(f"{prop}: {val};")
+        decls.append(_serialize_decl(prop, val))
     if not decls:
         return ""
     return "." + class_name + " { " + " ".join(decls) + " }"
@@ -2829,7 +2890,7 @@ def build_inner_style_block(
             for state_name, state_props in states.items():
                 state_decls = []
                 for prop, val in state_props.items():
-                    state_decls.append(f"{prop}: {val};")
+                    state_decls.append(_serialize_decl(prop, val))
                 if state_decls:
                     # Pseudo-elementos (before/after) usan `::`, pseudo-clases usan `:`
                     sep = "::" if state_name in ("before", "after") else ":"

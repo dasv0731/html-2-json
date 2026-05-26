@@ -4,6 +4,25 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-26 — v3.7: tags vacios decorativos -> ct_div_block (post-render Test-01 round 2)
+
+Bug descubierto al ver el segundo render de Test-01: spans/lis/buttons HTML vacíos (típicamente decorativos con dimensiones via CSS, ej. `<span class="brand-mark" aria-hidden></span>` como cuadradito de color) se mapeaban a `ct_text_block`. Oxygen renderiza un placeholder/label visible en ct_text_blocks sin `ct_content`, descuadrando todo el layout del decorativo.
+
+### Fix
+
+Nuevo helper `_is_empty_tag(tag)`: True si el tag no tiene ni texto significativo ni hijos Tag. Aplicado al INICIO de los 4 trios (`<span>`/`<em>`/`<strong>`/etc., `<li>`, `<button>`, TRIO_TAGS general): si el tag está vacío, retornar `ct_div_block` con `useCustomTag`. Resto del trío sin cambios.
+
+### Validación
+
+Re-corrido de Test-01:
+- `.t01__brand-mark` (header + footer) ahora `ct_div_block` (antes `ct_text_block`).
+- `.t01__hero-dot` (separadores meta) ahora `ct_div_block`.
+- `.t01__avatar` (article header) ahora `ct_div_block`.
+
+Estos decorativos ya no muestran texto placeholder; preservan dimensiones y background del CSS sin contenido espurio.
+
+---
+
 ## 2026-05-26 — v3.6: fixes derivados de Test-01 (Metalectro blog) post-render
 
 Tres bugs descubiertos al pegar el JSON del primer test integral en Oxygen y observar el render real.

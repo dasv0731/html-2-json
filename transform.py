@@ -2071,6 +2071,20 @@ def _has_text_content(tag: Tag) -> bool:
     return bool(text)
 
 
+def _is_empty_tag(tag: Tag) -> bool:
+    """True si el tag no tiene ni texto ni hijos Tag (solo whitespace o nada).
+    v3.7: tags vacios decorativos deben emitirse como ct_div_block en lugar de
+    ct_text_block. Oxygen renderiza un placeholder de texto ("Click to edit"/
+    similar) en ct_text_block sin ct_content, lo que descuadra layouts donde
+    el tag se usa como decoracion (ej. <span class="brand-mark" aria-hidden>
+    como cuadradito de color)."""
+    if _has_text_content(tag):
+        return False
+    if any(isinstance(c, Tag) for c in tag.children):
+        return False
+    return True
+
+
 def _has_inline_children_with_text(tag: Tag) -> bool:
     """
     True si el tag tiene hijos Tag inline mezclados con texto, o solo hijos inline con texto.
@@ -2201,6 +2215,9 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
     # name, value, formaction, etc.) viajan automáticamente como custom-attributes
     # editables desde el panel "Advanced > Custom Attributes" de Oxygen.
     if name == "button":
+        # v3.7: button vacio -> ct_div_block (button decorativo o controlado por JS).
+        if _is_empty_tag(tag):
+            return ("ct_div_block", {"useCustomTag": "true", "tag": "button"})
         inline_tags_for_button = {"em", "strong", "span", "small", "br", "i", "b", "u", "code"}
         # Hijos estructurales: cualquier tag que no sea inline puro
         structural_children = [
@@ -2217,7 +2234,7 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
         non_text_children = [c for c in tag.children if hasattr(c, "name") and c.name]
         if non_text_children and all(c.name in inline_tags_for_button for c in non_text_children):
             return ("oxy_rich_text", {"useCustomTag": "true", "tag": "button"})
-        # Caso 1: texto plano puro (o vacío)
+        # Caso 1: texto plano puro
         return ("ct_text_block", {"useCustomTag": "true", "tag": "button"})
 
     # <img>: ct_image
@@ -2286,7 +2303,10 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
     # v3.6: aplicar trio (estructural -> div, inline mixto -> rich text, texto -> text)
     # cuando el span contiene un SVG o img como hijo (caso comun: <span class="icon"><svg/></span>),
     # ct_text_block ignora hijos y el SVG se pierde. ct_div_block los preserva.
+    # v3.7: tags vacios decorativos -> ct_div_block (no ct_text_block, que muestra placeholder).
     if name in ("span", "em", "strong", "small", "b", "u", "mark"):
+        if _is_empty_tag(tag):
+            return ("ct_div_block", {"useCustomTag": "true", "tag": name})
         inline_set_for_span = {"em", "strong", "span", "small", "br", "i", "b", "u", "code", "a", "mark"}
         structural_children = [
             c for c in tag.children
@@ -2296,7 +2316,7 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
             return ("ct_div_block", {"useCustomTag": "true", "tag": name})
         if _has_inline_children_with_text(tag):
             return ("oxy_rich_text", {"useCustomTag": "true", "tag": name})
-        # Texto plano puro o tag vacio
+        # Texto plano puro
         return ("ct_text_block", {"useCustomTag": "true", "tag": name})
 
     # ul / ol -> ct_div_block con useCustomTag
@@ -2305,6 +2325,9 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
 
     # li -> tres mapeos segun contenido (validado empiricamente)
     if name == "li":
+        # v3.7: li vacio -> ct_div_block (evita placeholder de Oxygen en ct_text_block vacio).
+        if _is_empty_tag(tag):
+            return ("ct_div_block", {"useCustomTag": "true", "tag": "li"})
         # Caso 1: li con tags estructurales hijos (div, ul, h1, etc) -> ct_div_block[li]
         # Caso 2: li con HTML inline mixto (em, strong, a, br, etc) -> oxy_rich_text[li]
         # Caso 3: li con texto plano puro -> ct_text_block[li]
@@ -2420,6 +2443,9 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
         "var", "kbd", "samp",        # texto inline tecnico
     }
     if name in TRIO_TAGS:
+        # v3.7: trio tag vacio -> ct_div_block (evita placeholder de Oxygen).
+        if _is_empty_tag(tag):
+            return ("ct_div_block", {"useCustomTag": "true", "tag": name})
         inline_set = {"em", "strong", "span", "small", "br", "i", "b", "u", "code", "a"}
         structural_children = [
             c for c in tag.children

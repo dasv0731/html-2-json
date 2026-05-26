@@ -2358,6 +2358,8 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
         "table", "thead", "tbody", "tfoot", "tr", "colgroup",
         "form", "fieldset", "select",
         "blockquote", "pre",
+        # v3.5: figure es contenedor (lleva img + figcaption), dl es definition list
+        "figure", "picture", "dl",
     }
     if name in PURE_CONTAINER_TAGS:
         return ("ct_div_block", {"useCustomTag": "true", "tag": name})
@@ -2382,6 +2384,12 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
         "figcaption", "summary",     # otros: caption/summary
         "option", "code",            # inline texto (option en select, code standalone)
         "textarea",                  # textarea acepta texto pero no HTML inline
+        # v3.5: tags inline-texto comunes en blogs/articulos
+        "time",                      # <time datetime="..."> con texto plano
+        "address",                   # contacto
+        "dt", "dd",                  # definition list items
+        "cite", "q", "ins", "del", "abbr",  # texto inline semantico
+        "var", "kbd", "samp",        # texto inline tecnico
     }
     if name in TRIO_TAGS:
         inline_set = {"em", "strong", "span", "small", "br", "i", "b", "u", "code", "a"}

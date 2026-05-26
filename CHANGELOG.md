@@ -4,6 +4,32 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-26 — v3.5: tags HTML faltantes detectados en testing real
+
+Fix derivado del primer test integral (blog Metalectro). El test reveló que `<figure>` y `<time>` caían a "Tag desconocido" → `ct_div_block` sin tag, perdiendo la semántica HTML y rompiendo cualquier CSS que apunte a esas clases esperando que sean `<figure>`/`<time>` reales.
+
+### Tags agregados a PURE_CONTAINER_TAGS
+
+- `<figure>` (contenedor de img + figcaption)
+- `<picture>` (contenedor de source + img responsive)
+- `<dl>` (definition list, contenedor de dt/dd)
+
+### Tags agregados a TRIO_TAGS
+
+- `<time>` (texto datetime)
+- `<address>` (info de contacto)
+- `<dt>`, `<dd>` (items de definition list)
+- `<cite>`, `<q>`, `<ins>`, `<del>`, `<abbr>` (texto inline semántico)
+- `<var>`, `<kbd>`, `<samp>` (texto inline técnico)
+
+Todos siguen el mismo patrón establecido en v3.2: contenedores puros van a `ct_div_block` con `useCustomTag`, tags texto-inline pasan por trío (estructural → div, inline mixto → rich text, plano → text_block), todos con `useCustomTag`.
+
+### Validación
+
+Test-01 (blog Metalectro completo, 403 nodos, 154 clases) ya no emite ningún "Tag no mapeado".
+
+---
+
 ## 2026-05-26 — Sesión "v3.4": componentes multimedia + filtro de clases internas (tercera auditoría)
 
 Cuarta iteración del día. Basada en una tercera pasada exhaustiva del código de Oxygen que cubrió componentes especializados (video, slider, social-icons, progress-bar, map, soundcloud, gallery, easy-posts, dynamic-list, login/search/comments forms, widget, toolset-view, header builder, sidebar, code-block, selector, shortcode wrappers, inner-content), pipeline csslink/signature/main-template, admin/toolbar views (incluyendo conditions), CSS dinámico (oxygen.css clases utilitarias internas vs oxygen.variables.css), wpml-config.xml, vendor (unslider/aos/alpinejs).

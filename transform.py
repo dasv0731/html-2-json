@@ -1500,12 +1500,19 @@ def _grid_to_child_rules(val: str) -> Optional[Dict[str, Any]]:
         ints = [i // g for i in ints]
 
     total = sum(ints)
+    # v3.19: Oxygen interpreta `child-index` en orden INVERSO al DOM:
+    #   child-index 0      = ULTIMO hijo del DOM
+    #   child-index N-1    = PRIMER hijo del DOM
+    # Por eso invertimos `ints` antes de mappear a child-rules. Sin esto, el
+    # primer hijo del DOM toma el span del ultimo fr del CSS (sidebar con 4fr
+    # quedaba con 8fr de ancho y el TOC interno se desbordaba como 7 columnas).
+    reversed_spans = list(reversed(ints))
     return {
         "grid-column-count": str(total),
         "grid-column-min-width": "10",
         "grid-child-rules": [
             {"child-index": i, "column-span": str(span), "row-span": ""}
-            for i, span in enumerate(ints)
+            for i, span in enumerate(reversed_spans)
         ],
     }
 

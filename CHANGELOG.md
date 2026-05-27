@@ -4,6 +4,61 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-27 — v3.19: `grid-child-rules` con `child-index` invertido (Bug Q)
+
+Bug visible en Test-02 `.t02__article-layout` (`grid-template-columns: 4fr 8fr` con sidebar+article): el sidebar quedaba con 67% del ancho en lugar de 33%, y el TOC interno se desbordaba apareciendo como **7 columnas horizontales** (una por cada `<li>` del índice).
+
+### Causa raíz
+
+Oxygen interpreta `child-index` en `grid-child-rules` en **orden inverso al DOM**:
+
+| Convención | child-index 0 = | child-index N-1 = |
+|---|---|---|
+| CSS estándar (DOM normal) | primer hijo | último hijo |
+| **Oxygen `grid-child-rules`** | **último hijo** | **primer hijo** |
+
+Validado contra dos JSONs editados a mano que el user reportó como visualmente correctos:
+
+```
+.t02__post-hero__inner: grid-template-columns: 7fr 5fr
+  DOM: [main, cta]
+  child-index 0: span 5  → cta (último) toma 5/12 = 42% ✓
+  child-index 1: span 7  → main (primero) toma 7/12 = 58% ✓
+
+.t02__article-layout: grid-template-columns: 4fr 8fr
+  DOM: [sidebar, article]
+  child-index 0: span 2  → article (último) toma 2/3 = 67% ✓
+  child-index 1: span 1  → sidebar (primero) toma 1/3 = 33% ✓
+```
+
+### Fix
+
+En `_grid_to_child_rules()`, invertir el orden de `ints` antes de mappear:
+
+```python
+reversed_spans = list(reversed(ints))
+return {
+    "grid-column-count": str(total),
+    "grid-column-min-width": "10",
+    "grid-child-rules": [
+        {"child-index": i, "column-span": str(span), "row-span": ""}
+        for i, span in enumerate(reversed_spans)
+    ],
+}
+```
+
+### Tabla actualizada del Bug O (v3.17)
+
+Para los mismos inputs, el output ahora es:
+
+| CSS | DOM children | spans emitidos | Oxygen interpreta |
+|---|---|---|---|
+| `7fr 5fr` | [main, cta] | `[5, 7]` | main=7/12, cta=5/12 |
+| `4fr 8fr` | [sidebar, article] | `[2, 1]` (count=3) | sidebar=1/3, article=2/3 |
+| `1.4fr 1fr` | [text, image] | `[5, 7]` | text=7/12, image=5/12 |
+
+---
+
 ## 2026-05-27 — v3.17: `grid-template-columns` no uniforme via `grid-child-rules` (Bug O)
 
 Bug visible en Test-02 hero (`.t02__post-hero__inner { grid-template-columns: 7fr 5fr }`): el grid quedaba con todas las columnas iguales en lugar de respetar el ratio 7:5. Mismo síntoma en `.t02__article-layout` (4fr 8fr), `.t02__bottom-cta__grid` (1.4fr 1fr), etc.

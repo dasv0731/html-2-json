@@ -1300,22 +1300,25 @@ def convert_properties(props: Dict[str, str], block_type: Optional[str] = None) 
         if block_type == "ct_link_button" and prop == "color":
             effective_prop = "button-text-color"
 
-        # Workaround margin: Oxygen aplica `.ct-div-block { margin: 0 }` con prioridad CSS.
-        # Cualquier margin-* numerico en un ct_div_block es sobrescrito a 0.
-        # Solucion: redirigir a custom-css con !important para que sobreviva.
-        # NOTA: solo numericos. Si es "auto", sigue la logica de margin-X-unit: auto.
+        # Workaround margin: Oxygen aplica `.ct-div-block { margin: 0 !important }` con
+        # prioridad CSS. Cualquier margin-* en un ct_div_block (numerico O auto)
+        # es sobrescrito a 0 a menos que el override use !important.
+        # v3.10: extender a `margin-X: auto` que tambien necesita !important para
+        # que el centrado de containers (margin: 0 auto) funcione.
         if block_type == "ct_div_block" and prop in {"margin-top", "margin-right", "margin-bottom", "margin-left"}:
             v_clean = val.strip().lower()
-            if v_clean != "auto":
-                # Emitir a custom-css con !important
-                # Asegurar que tiene unidad: si es solo numero, asumir px
-                num, unit = _split_value_unit(val)
-                if num is not None:
-                    unit_str = unit or "px"
-                    custom_css.append(f"{prop}: {num}{unit_str} !important;")
-                else:
-                    custom_css.append(f"{prop}: {val} !important;")
+            if v_clean == "auto":
+                # margin-X: auto via custom-css con !important.
+                custom_css.append(f"{prop}: auto !important;")
                 continue
+            # Numericos: misma idea, asegurar unidad px si no viene.
+            num, unit = _split_value_unit(val)
+            if num is not None:
+                unit_str = unit or "px"
+                custom_css.append(f"{prop}: {num}{unit_str} !important;")
+            else:
+                custom_css.append(f"{prop}: {val} !important;")
+            continue
 
         # Decidir si es nativo o va a custom-css
         if not _is_property_native(effective_prop, val):

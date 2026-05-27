@@ -4,6 +4,44 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-27 — v3.10: margin: auto en ct_div_block tambien necesita custom-css !important
+
+Continuacion del fix de v3.9. Aunque el JSON ahora emitia `margin-left: "auto"` + `margin-left-unit: "auto"` correctamente, el container con `margin: 0 auto` **seguia sin centrarse en Oxygen**.
+
+### Causa raíz
+
+Oxygen aplica `.ct-div-block { margin: 0 !important; }` con prioridad CSS. Esto afecta a TODOS los ct_div_block, incluyendo cuando el user define `margin: 0 auto` en su clase. El skill ya tenia workaround para margins numericos (redirigir a `custom-css` con `!important`), pero el branch SKIPEABA explicitamente el caso `auto`:
+
+```python
+# v3.9 (broken):
+if v_clean != "auto":
+    custom_css.append(...)  # solo para numericos
+```
+
+### Fix v3.10
+
+Extender el workaround a `auto` tambien:
+
+```python
+if v_clean == "auto":
+    custom_css.append(f"{prop}: auto !important;")
+    continue
+# resto del fix numerico
+```
+
+Ahora `margin: 0 auto` en `.t01__container` emite:
+```css
+custom-css: "margin-top: 0px !important; margin-bottom: 0px !important; margin-right: auto !important; margin-left: auto !important;"
+```
+
+El centrado del container funciona correctamente.
+
+### Trade-off
+
+El panel "Position > Margin" de Oxygen NO mostrara los valores auto editables — viven en custom-css. Para editar margin del container, el user debe ir a "Advanced > Custom CSS". Mismo trade-off que con margins numericos del workaround original.
+
+---
+
 ## 2026-05-27 — v3.9: margin/width auto necesita value + unit (Test-01 hero container)
 
 Bug descubierto al ver que `<div class="t01__container">` con `margin: 0 auto` no se centraba en Oxygen — quedaba alineado a la izquierda con un "corte" visible a la derecha.

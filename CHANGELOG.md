@@ -4,6 +4,35 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-27 — v3.9: margin/width auto necesita value + unit (Test-01 hero container)
+
+Bug descubierto al ver que `<div class="t01__container">` con `margin: 0 auto` no se centraba en Oxygen — quedaba alineado a la izquierda con un "corte" visible a la derecha.
+
+### Causa raíz
+
+El skill mapeaba `margin-left: auto` a SOLO `margin-left-unit: "auto"` (sin emitir `margin-left` con value). El flow de Oxygen `build_css` (component.class.php:2766-2778) tiene branches:
+
+- **SECTION A** (línea 2766): si la prop tiene default unit definido (margin-left tiene `'px'`), procesa el unit:
+  - Si `atts['margin-left-unit'] == 'auto'`, hace `$atts['margin-left'] = 'auto'`. **Pero solo si `atts['margin-left']` ya existía**. Si solo emites `margin-left-unit` sin `margin-left`, esta inyección NO se dispara porque la línea 2766 chequea contra `default_atts[$default_param.'-unit']`, no contra el `param` actual.
+
+Resultado: Oxygen emite `margin-left-unit: auto` al JSON guardado, pero al renderizar el CSS final, **NO sale `margin-left: auto;`** porque falta el value pair.
+
+### Fix
+
+En `_convert_value_with_unit`, cuando el value es `"auto"` para `margin-{top,right,bottom,left}` o `width/height/min-/max-`, emitir AMBOS:
+
+```python
+return [(prop, "auto"), (f"{prop}-unit", "auto")]
+```
+
+Antes solo emitía `(f"{prop}-unit", "auto")`. El cambio asegura que el CSS final tenga `<prop>: auto;`.
+
+### Validación
+
+`.t01__container` ahora emite `margin-left: auto` + `margin-left-unit: auto` (y mismo para right). Centrado funciona correctamente.
+
+---
+
 ## 2026-05-27 — v3.8: auto `align-items: stretch` para ct_div_block (Test-01 hero overflow)
 
 Bug arquitectónico descubierto durante el aislamiento del hero: `<section class="t01__hero">` (hijo de `<div class="t01">`) no ocupaba el 100% del ancho del parent. Causa raíz: Oxygen aplica `display:flex; flex-direction:column; align-items:flex-start` por default a TODOS los ct_div_block. Con `align-items:flex-start`, los hijos no estiran al ancho del parent — se encogen al ancho de su contenido. Eso rompe el block flow natural de HTML donde `<section>`/`<header>`/`<div>` ocupan 100% del padre.

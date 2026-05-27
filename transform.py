@@ -1427,10 +1427,15 @@ def _convert_value_with_unit(prop: str, val: str) -> List[Tuple[str, str]]:
 
     # Valores keyword (como "auto", "none", "row", "center", "flex-end", etc.)
     if not _looks_numeric(val):
-        # Si es "auto", manejarlo como unit
+        # Si es "auto" en una prop con unit, emitir AMBOS: value + unit.
+        # v3.9: antes solo emitiamos `<prop>-unit: "auto"` sin value, lo que
+        # causaba que Oxygen no emitiera la propiedad al CSS final (su flow
+        # de build_css concatena value + unit; sin value, queda incompleto).
+        # Tanto value como unit deben ser "auto" para que Oxygen genere
+        # `<prop>: auto;` al renderizar.
         if val.lower() == "auto" and prop in {"margin-top", "margin-right", "margin-bottom", "margin-left",
                                                 "width", "height", "max-width", "max-height", "min-width", "min-height"}:
-            return [(f"{prop}-unit", "auto")]
+            return [(prop, "auto"), (f"{prop}-unit", "auto")]
         # Si es un keyword normal, emitir como string
         return [(prop, val)]
 

@@ -613,6 +613,23 @@ def expand_shorthands(props: Dict[str, str]) -> Dict[str, str]:
             continue
         if prop in ("padding", "margin"):
             out.update(_expand_box(prop, val))
+        elif prop in ("margin-inline", "margin-block", "padding-inline", "padding-block"):
+            # v3.18: shorthands logicos a sus equivalentes fisicos.
+            # margin-inline: <X> [<Y>]  -> margin-left: X, margin-right: Y (o X)
+            # margin-block:  <X> [<Y>]  -> margin-top: X, margin-bottom: Y (o X)
+            # padding-inline / padding-block: idem con padding-*.
+            # Importante porque Oxygen no reconoce estos shorthands como nativos y los
+            # deja en custom-css sin expandir, lo que ademas para margin pierde el
+            # workaround !important (margin: 0 !important del default ct_div_block sobrescribe).
+            base, axis = prop.split("-")  # ("margin"|"padding"), ("inline"|"block")
+            sides = ("left", "right") if axis == "inline" else ("top", "bottom")
+            parts = val.strip().split()
+            if len(parts) == 1:
+                out[f"{base}-{sides[0]}"] = parts[0]
+                out[f"{base}-{sides[1]}"] = parts[0]
+            elif len(parts) == 2:
+                out[f"{base}-{sides[0]}"] = parts[0]
+                out[f"{base}-{sides[1]}"] = parts[1]
         elif prop == "border":
             out.update(_expand_border_all(val))
         elif prop == "border-radius":
@@ -1348,6 +1365,61 @@ def convert_properties(props: Dict[str, str], block_type: Optional[str] = None) 
         for k, v in emit_pairs:
             oxygen[k] = v
 
+    # v3.18: Refuerzo de centering horizontal en ct_div_block.
+    # Cuando margin-left:auto + margin-right:auto coexisten (resultado tipico de
+    # `margin-inline: auto` o `margin: 0 auto`), agregar tambien margin-top:0 y
+    # margin-bottom:0 con !important. Es defensivo: aunque Oxygen aplica
+    # `margin: 0 !important` por default al ct_div_block, otras reglas globales
+    # (theme styles, parent rules) pueden filtrarse y romper el centrado.
+    # Solo se agrega si NO hay margin-top/bottom ya declarados (el dev pudo
+    # haber querido un margin vertical explicito).
+    if block_type == "ct_div_block":
+        def _has_decl(side: str) -> bool:
+            return any(s.lstrip().startswith(f"margin-{side}:") for s in custom_css) \
+                or f"margin-{side}" in oxygen
+        has_left_auto = any(
+            s.lstrip().startswith("margin-left:") and "auto" in s for s in custom_css
+        )
+        has_right_auto = any(
+            s.lstrip().startswith("margin-right:") and "auto" in s for s in custom_css
+        )
+        if has_left_auto and has_right_auto:
+            if not _has_decl("top"):
+                custom_css.append("margin-top: 0px !important;")
+            if not _has_decl("bottom"):
+                custom_css.append("margin-bottom: 0px !important;")
+
+    # v3.17: Workaround Oxygen grid-template-columns no uniforme via grid-child-rules.
+    # Si display:grid + grid-template-columns quedo solo en custom-css (no mapeable a
+    # grid-column-count uniforme), pero las fracciones son TODAS Nfr, podemos
+    # preservar el grid nativo usando la prop avanzada `grid-child-rules` de Oxygen:
+    #   - grid-column-count: <suma de fracciones simplificada>
+    #   - grid-child-rules: [{child-index, column-span}, ...]  con span = numerador
+    #   - grid-column-min-width: 10  (safety para que no se salgan en mobile)
+    # Esto preserva exactamente el ratio (4fr 8fr -> 1:2, 7fr 5fr -> 7:5, etc.).
+    #
+    # Para casos mixtos (1fr auto, 200px 1fr) no hay equivalente exacto en grid
+    # nativo de Oxygen, asi que ahi swap a flex+row (los hijos quedan side-by-side
+    # y el max-width / contenido natural dicta el reparto).
+    if oxygen.get("display") == "grid":
+        gtc_idx = next(
+            (i for i, s in enumerate(custom_css)
+             if s.lstrip().startswith("grid-template-columns:")),
+            -1,
+        )
+        if gtc_idx >= 0:
+            gtc_val = custom_css[gtc_idx].split(":", 1)[1].rstrip(";").strip()
+            child_rules = _grid_to_child_rules(gtc_val)
+            if child_rules is not None:
+                # Caso todas fr: grid nativo con child-rules
+                oxygen["grid-column-count"] = child_rules["grid-column-count"]
+                oxygen["grid-column-min-width"] = child_rules["grid-column-min-width"]
+                oxygen["grid-child-rules"] = child_rules["grid-child-rules"]
+            else:
+                # Caso mixto (auto, px, %): fallback a flex+row
+                oxygen["display"] = "flex"
+                oxygen.setdefault("flex-direction", "row")
+
     return dict(oxygen), custom_css
 
 
@@ -1374,6 +1446,68 @@ def _is_property_native(prop: str, val: str) -> bool:
     if prop == "transition-property":
         return True
     return False
+
+
+def _grid_to_child_rules(val: str) -> Optional[Dict[str, Any]]:
+    """
+    Mapea grid-template-columns con TODAS las columnas en fracciones `Nfr`
+    a propiedades nativas avanzadas de Oxygen:
+      - grid-column-count: N (suma de fracciones, simplificadas por GCD)
+      - grid-child-rules: lista de {child-index, column-span} con span = numerador
+      - grid-column-min-width: 10 (safety default)
+
+    Ejemplos:
+      "7fr 5fr"          -> count 12, spans [7, 5]
+      "4fr 8fr"          -> count 3,  spans [1, 2]   (simplificado por GCD=4)
+      "1.4fr 1fr"        -> count 12, spans [7, 5]   (x5 para integers)
+      "1.2fr 1fr 1fr"    -> count 16, spans [6, 5, 5] (x5)
+      "3fr 1fr 2fr"      -> count 6,  spans [3, 1, 2]
+      "1fr 1fr"          -> None (caso uniforme: lo maneja _grid_template_to_oxygen)
+
+    Retorna None si:
+      - Hay valores no-fr (auto, px, %, minmax(), repeat(), etc.).
+      - Todas las columnas son iguales (mejor _grid_template_to_oxygen normal).
+    """
+    parts = val.strip().split()
+    if not parts:
+        return None
+
+    fractions: List[float] = []
+    for p in parts:
+        m = re.match(r"^([0-9]+(?:\.[0-9]+)?)fr$", p.strip())
+        if not m:
+            return None
+        fractions.append(float(m.group(1)))
+
+    # Si todas son iguales (1fr 1fr ... o 2fr 2fr ...), dejar al mapper normal
+    if len(set(fractions)) == 1:
+        return None
+
+    # Convertir a integers (multiplicar por 10^max_decimal_places)
+    def _decimal_places(x: float) -> int:
+        s = repr(x)
+        return len(s.split(".")[1]) if "." in s else 0
+
+    max_dec = max(_decimal_places(f) for f in fractions)
+    multiplier = 10 ** max_dec
+    ints = [int(round(f * multiplier)) for f in fractions]
+
+    # Simplificar por GCD
+    from math import gcd
+    from functools import reduce
+    g = reduce(gcd, ints)
+    if g > 1:
+        ints = [i // g for i in ints]
+
+    total = sum(ints)
+    return {
+        "grid-column-count": str(total),
+        "grid-column-min-width": "10",
+        "grid-child-rules": [
+            {"child-index": i, "column-span": str(span), "row-span": ""}
+            for i, span in enumerate(ints)
+        ],
+    }
 
 
 def _grid_template_to_oxygen(val: str) -> Optional[Dict[str, str]]:

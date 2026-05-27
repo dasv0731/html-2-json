@@ -4,6 +4,87 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-27 — v3.17: `grid-template-columns` no uniforme via `grid-child-rules` (Bug O)
+
+Bug visible en Test-02 hero (`.t02__post-hero__inner { grid-template-columns: 7fr 5fr }`): el grid quedaba con todas las columnas iguales en lugar de respetar el ratio 7:5. Mismo síntoma en `.t02__article-layout` (4fr 8fr), `.t02__bottom-cta__grid` (1.4fr 1fr), etc.
+
+### Causa raíz
+
+Oxygen tiene panel nativo para `grid-column-count` (columnas uniformes vía `repeat(N, 1fr)`) pero **no expone `grid-template-columns` con fracciones arbitrarias**. Cuando el mapper viejo (`_grid_template_to_oxygen`) no lograba mapear el valor, caía a `custom-css`, y Oxygen ignoraba ese custom-css en el panel visual del builder — el grid renderizaba sin definición de columnas.
+
+### Solución
+
+Oxygen tiene una propiedad avanzada no documentada: **`grid-child-rules`**. Permite definir `column-span` por `child-index` cuando el `grid-column-count` es mayor que la cantidad real de hijos (estilo Bootstrap: 12 sub-columnas, hijos toman N spans). Ejemplo para `7fr 5fr`:
+
+```json
+{
+  "display": "grid",
+  "grid-column-count": "12",
+  "grid-child-rules": [
+    {"child-index": 0, "column-span": "7", "row-span": ""},
+    {"child-index": 1, "column-span": "5", "row-span": ""}
+  ],
+  "grid-column-min-width": "10"
+}
+```
+
+Nueva función `_grid_to_child_rules(val)`:
+1. Parsea las fracciones (`Nfr` con decimales aceptados).
+2. Normaliza decimales a integers (`1.4fr 1fr` → `7fr 5fr` con `×5`).
+3. Simplifica por GCD (`4fr 8fr` → `1fr 2fr` con count=3).
+4. Emite `grid-column-count = suma`, `grid-child-rules` con spans, `grid-column-min-width: 10`.
+
+### Mapeo final por caso
+
+| `grid-template-columns` | Mapeo Oxygen |
+|---|---|
+| `repeat(3, 1fr)` (uniforme) | `grid-column-count: 3` (manejo existente) |
+| `7fr 5fr` (todas fr, no uniforme) | count=12, spans=[7,5] |
+| `4fr 8fr` (simplificable) | count=3, spans=[1,2] |
+| `1.4fr 1fr` (decimales) | count=12, spans=[7,5] |
+| `1fr auto`, `200px 1fr` (mixto) | fallback a `display:flex; flex-direction:row` |
+
+Test-02 hero: `.t02__post-hero__inner` ahora emite el grid nativo con ratio 7:5 preservado exactamente.
+
+---
+
+## 2026-05-27 — v3.18: expandir `margin-inline`/`margin-block` + refuerzo de centering (Bug P)
+
+Bug visible en Test-02 `.t02__container { margin-inline: auto }`: el container no se centraba porque `margin-inline` quedaba en custom-css sin expandir y sin `!important`. Oxygen aplica `.ct-div-block { margin: 0 !important }` por default, así que cualquier margin sin `!important` queda sobrescrito.
+
+### Cambio 1: expansión de shorthands lógicos
+
+Antes, `margin-inline`/`margin-block`/`padding-inline`/`padding-block` caían al else genérico y se emitían como custom-css crudo. Ahora se expanden a sus pares físicos en `expand_shorthands`:
+
+```
+margin-inline: auto       -> margin-left: auto, margin-right: auto
+margin-block: 16px 24px   -> margin-top: 16px, margin-bottom: 24px
+padding-inline: 32px      -> padding-left: 32px, padding-right: 32px
+```
+
+Esto deja que el resto del pipeline aplique:
+- El workaround `margin-X: auto` → `custom-css: margin-X: auto !important` (de v3.10).
+- El paddings nativos al panel (no a custom-css).
+
+### Cambio 2: refuerzo de centering
+
+Cuando un `ct_div_block` tiene **ambos** `margin-left:auto` + `margin-right:auto` en custom-css (caso típico de centering), agregar también `margin-top: 0px !important` y `margin-bottom: 0px !important` si no hay otro margin-top/bottom declarado. Defensivo: aunque Oxygen aplica `margin: 0 !important` por default, reglas globales del tema pueden filtrarse y romper el centrado.
+
+### Resultado en Test-02 `.t02__container`
+
+```css
+custom-css:
+  max-width: var(--container);
+  margin-left: auto !important;
+  margin-right: auto !important;
+  margin-top: 0px !important;
+  margin-bottom: 0px !important;
+```
+
+Y `padding-inline: 32px` ahora viaja como `padding-left: 32` + `padding-right: 32` nativos (no custom-css). Las media queries (`@tablet padding-inline: 24px`) también se expanden correctamente.
+
+---
+
 ## 2026-05-27 — v3.15: auto `flex-direction: row` tambien con `inline-flex` (Bug N)
 
 Bug visible en Test-01 related-link: `<a class="t01__related-link">` con `display:inline-flex; align-items:center;` (sin flex-direction explicito) apilaba el texto y el SVG verticalmente. El auto-add de `flex-direction: row` del skill solo se aplicaba a `display: flex`, no a `inline-flex`.

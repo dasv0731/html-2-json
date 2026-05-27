@@ -2519,10 +2519,28 @@ def build_classes_block(default_rules: Dict, media_rules: Dict, used_classes: Li
     # Las que no tienen CSS se emiten con `original: {}` (visto en JSONs reales).
     # Esto preserva la asociacion HTML -> clase declarada que Oxygen necesita.
     relevant = list(used_classes)  # respeta orden de aparicion en HTML
-    # Avisar de las definidas en CSS pero no usadas (estas SI se siguen omitiendo,
-    # porque son huerfanas reales en el CSS del usuario)
-    for c in all_classes - set(used_classes):
+    used_set = set(used_classes)
+
+    # v3.12: incluir BEM modifiers definidos en CSS aunque no aparezcan en el
+    # HTML inicial. Casos comunes: .X--open, .X--closed, .X--active, .X--current.
+    # El JS los agrega dinamicamente al toggle/hover/click. Sin su CSS asociado
+    # en Oxygen, los toggles funcionan en el DOM pero no tienen efecto visual.
+    # Solo incluimos el modifier si su clase base esta usada en HTML (evita
+    # incluir clases huerfanas reales).
+    auto_included: List[str] = []
+    for c in all_classes - used_set:
+        if "--" in c:
+            base = c.split("--", 1)[0]
+            if base in used_set:
+                relevant.append(c)
+                auto_included.append(c)
+                continue
         WARN.add(f"Clase '.{c}' definida en CSS pero no usada en HTML. Se omite.")
+    if auto_included:
+        WARN.add(
+            f"BEM modifiers auto-incluidos (probablemente toggled via JS): "
+            f"{', '.join('.' + c for c in auto_included)}"
+        )
     # Avisar de las usadas en HTML pero sin CSS (estas se emiten igual, pero
     # le decimos al usuario que probablemente quiere agregarles estilos o que
     # vienen del bloque global de Oxygen).

@@ -4,6 +4,50 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-27 — v3.12: incluir BEM modifiers auto-toggled via JS
+
+Bug descubierto en Test-01 sidebar TOC: el toggle del button `.t01__toc-head` funcionaba correctamente (las clases `--closed` se agregaban/quitaban del DOM via JS) pero **no había efecto visual**. Los `getComputedStyle` mostraban que las clases sí cambiaban pero los styles no se aplicaban.
+
+### Causa raíz
+
+El skill descarta cualquier clase definida en CSS que NO esté presente en el HTML inicial:
+
+```python
+# Antes (v3.11):
+for c in all_classes - set(used_classes):
+    WARN.add(f"Clase '.{c}' definida en CSS pero no usada en HTML. Se omite.")
+```
+
+Eso rompe el patrón muy común de **modifiers BEM dinámicos**: `.X--open`, `.X--closed`, `.X--active`, `.X--current`, etc. — clases que el JS agrega al hacer toggle/click/hover. Sin su CSS asociado emitido a Oxygen, las clases existen en el DOM pero no tienen estilo.
+
+### Fix
+
+Si una clase tiene `--` (BEM modifier) y su clase base SÍ está usada en HTML, incluirla en el output con su CSS. Emite un WARN listando los modifiers auto-incluidos para que el user sepa.
+
+```python
+for c in all_classes - used_set:
+    if "--" in c:
+        base = c.split("--", 1)[0]
+        if base in used_set:
+            relevant.append(c)
+            auto_included.append(c)
+            continue
+    WARN.add(f"Clase '.{c}' ... Se omite.")
+if auto_included:
+    WARN.add(f"BEM modifiers auto-incluidos (probablemente toggled via JS): ...")
+```
+
+### Validación
+
+Test-01 sidebar v13:
+- `.t01v13__toc-nav--closed` → `max-height: 0` ✓ (antes omitido)
+- `.t01v13__toc-chev--closed` → `transform: rotate(-180deg)` ✓
+- `.t01v13__btn--header` → bg red + padding ✓ (no usado en sidebar pero base `t01__btn` sí)
+
+Clases huérfanas reales (no BEM modifiers, sin uso en HTML) siguen omitiéndose: `.t01__figure-img`, `.t01__footer-social-link`, etc.
+
+---
+
 ## 2026-05-27 — v3.11: background-image con gradient -> custom-css (Test-01 sidebar)
 
 Bug en pipeline de Oxygen detectado en `controller.css.js:5437-5439`:

@@ -1475,23 +1475,27 @@ def _convert_value_with_unit(prop: str, val: str) -> List[Tuple[str, str]]:
 
 
 def _looks_numeric(val: str) -> bool:
-    """True si el valor empieza con un numero (puede tener unidad)."""
+    """True si el valor empieza con un numero (puede tener unidad).
+    v3.14: acepta decimales sin cero inicial como '.65em', '.5rem'."""
     val = val.strip()
     if not val:
         return False
     # Hex color no es numerico
     if val.startswith("#"):
         return False
-    return bool(re.match(r"^-?\d", val))
+    # Acepta: 5, -5, 0.5, .5, -.5 al inicio
+    return bool(re.match(r"^-?(?:\d|\.\d)", val))
 
 
 def _split_value_unit(val: str) -> Tuple[Optional[str], Optional[str]]:
     """
-    Separa '15px' -> ('15', 'px'), '1.5em' -> ('1.5', 'em'), '50%' -> ('50', '%').
+    Separa '15px' -> ('15', 'px'), '1.5em' -> ('1.5', 'em'), '50%' -> ('50', '%'),
+    '.65em' -> ('.65', 'em') (decimal sin cero inicial — v3.14).
     Retorna (None, None) si no parsea.
     """
     val = val.strip()
-    m = re.match(r"^(-?\d+(?:\.\d+)?)([a-zA-Z%]*)$", val)
+    # Acepta dos formas de numero: \d+(\.\d+)? o \.\d+
+    m = re.match(r"^(-?(?:\d+(?:\.\d+)?|\.\d+))([a-zA-Z%]*)$", val)
     if m:
         num = m.group(1)
         unit = m.group(2) or None
@@ -2308,20 +2312,25 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
         return ("ct_div_block", {"tag": name})
 
     # h1-h6
+    # v3.13: preservar la semantica HTML. Antes el caso "HTML inline mixto"
+    # emitia oxy_rich_text sin useCustomTag, lo que renderizaba como <div>
+    # con un <p> envolvente — perdiendo el heading. Ahora pasa useCustomTag
+    # para que el rich text wrappee con el tag correcto (h2, h3, etc.).
     if name in ("h1", "h2", "h3", "h4", "h5", "h6"):
-        # Si tiene HTML inline mixto (em, span, br, etc) -> oxy_rich_text
         if _has_inline_children_with_text(tag):
-            return ("oxy_rich_text", {})
+            return ("oxy_rich_text", {"useCustomTag": "true", "tag": name})
         if name == "h1":
             return ("ct_headline", {})
         return ("ct_headline", {"tag": name})
 
     # p
+    # v3.13: emitir useCustomTag:"true", tag:"p" para preservar la semantica.
+    # ct_text_block / oxy_rich_text sin useCustomTag se renderizan como <div>,
+    # rompiendo accesibilidad y CSS que dependa de la etiqueta <p> real.
     if name == "p":
-        # Si tiene HTML inline mixto -> oxy_rich_text
         if _has_inline_children_with_text(tag):
-            return ("oxy_rich_text", {})
-        return ("ct_text_block", {})
+            return ("oxy_rich_text", {"useCustomTag": "true", "tag": "p"})
+        return ("ct_text_block", {"useCustomTag": "true", "tag": "p"})
 
     # span y otros tags inline
     # v3.6: aplicar trio (estructural -> div, inline mixto -> rich text, texto -> text)

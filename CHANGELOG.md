@@ -4,6 +4,61 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-27 — v3.14: decimales sin cero inicial (`.65em`, `.5rem`) (Bug M)
+
+Bug visible en Test-01 article: el `::before` de los `<li>` con `top: .65em` quedaba desfasado verticalmente (top no se aplicaba).
+
+### Causa
+
+`_looks_numeric` y `_split_value_unit` usaban regex `^-?\d+(\.\d+)?` que requiere un dígito ANTES del punto decimal. Valores como `.65em`, `.5rem`, `-.5em` no matcheaban → caían a la rama "keyword string" → Oxygen recibía `top: ".65em"` (string), y al procesar units, concatenaba el default `px` → `top: .65empx` (CSS inválido) → `top` ignorado → ::before desfasado.
+
+### Fix
+
+Regex actualizado para aceptar dos formas:
+- `\d+(\.\d+)?` (5, 0.5, etc.) — la forma existente
+- `\.\d+` (.65, .5, etc.) — nueva forma
+
+```python
+re.match(r"^(-?(?:\d+(?:\.\d+)?|\.\d+))([a-zA-Z%]*)$", val)
+```
+
+Ahora `.65em` se descompone correctamente: value `.65`, unit `em`.
+
+---
+
+## 2026-05-27 — v3.13: preservar etiquetas semanticas de `<p>` y headings mixtos (Bug L)
+
+Bug critico de semantica: el skill emitia `<p>` como `<div class="ct-text-block">` (no `<p>` real). Mismo problema con headings con HTML mixto.
+
+### Antes (broken)
+
+```python
+if name == "p":
+    if _has_inline_children_with_text(tag):
+        return ("oxy_rich_text", {})       # -> <div class="oxy-rich-text"><p>...</p></div>
+    return ("ct_text_block", {})           # -> <div class="ct-text-block">...</div>  ❌ NO <p>
+
+if name in ("h1", "h2", "h3", "h4", "h5", "h6"):
+    if _has_inline_children_with_text(tag):
+        return ("oxy_rich_text", {})       # -> <div class="oxy-rich-text"><p>...</p></div>  ❌ NO <hN>
+```
+
+### Después
+
+`useCustomTag: true, tag: "p"` (o `h2`/`h3`/etc.) en ambos casos:
+
+- `<p>texto</p>` → `<p class="ct-text-block ...">texto</p>` ✓
+- `<p>texto <strong>x</strong></p>` → `<p class="oxy-rich-text ...">texto <strong>x</strong></p>` ✓
+- `<h2>Tit <em>mix</em></h2>` → `<h2 class="oxy-rich-text ...">Tit <em>mix</em></h2>` ✓
+
+### Impacto
+
+- Accesibilidad correcta (lectores de pantalla detectan `<p>`, `<h2>`).
+- CSS que apunte a `p, h2` (selectores tag) ya funciona en Oxygen rendered.
+- Mejora SEO (motores de búsqueda detectan estructura semántica).
+
+---
+
 ## 2026-05-27 — v3.12: incluir BEM modifiers auto-toggled via JS
 
 Bug descubierto en Test-01 sidebar TOC: el toggle del button `.t01__toc-head` funcionaba correctamente (las clases `--closed` se agregaban/quitaban del DOM via JS) pero **no había efecto visual**. Los `getComputedStyle` mostraban que las clases sí cambiaban pero los styles no se aplicaban.

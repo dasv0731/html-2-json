@@ -4,6 +4,38 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-27 — v3.11: background-image con gradient -> custom-css (Test-01 sidebar)
+
+Bug en pipeline de Oxygen detectado en `controller.css.js:5437-5439`:
+
+```javascript
+if (parameter == 'background-image' || parameter == 'background-size') {
+    continue;  // delegate to getBackgroundLayersCSS
+}
+```
+
+Oxygen skipea `background-image` en su procesamiento normal — lo delega a `getBackgroundLayersCSS`. Ese handler **solo soporta URL como background-image**, no gradients (`linear-gradient`, `radial-gradient`, `conic-gradient`). Resultado: cualquier gradient emitido como `background-image` se pierde visualmente.
+
+### Caso real
+
+`.t01__sidecta::before` con `background-image: linear-gradient(45deg, transparent 45%, #FFD60A 45%, #FFD60A 55%, transparent 55%)` (el cuadrado decorativo amarillo de la card del sidebar) no aparecía.
+
+### Fix
+
+En `convert_properties`, detectar `background-image` con value que contenga `*gradient(`. Redirigir a `custom-css` (concatenado al state correspondiente). Lista de funciones detectadas:
+
+- `linear-gradient`, `repeating-linear-gradient`
+- `radial-gradient`, `repeating-radial-gradient`
+- `conic-gradient`, `repeating-conic-gradient`
+
+`background-image: url(...)` sigue por el flow nativo de Oxygen.
+
+### Trade-off
+
+El panel Background de Oxygen no mostrará el gradient editable — vive en custom-css.
+
+---
+
 ## 2026-05-27 — v3.10: margin: auto en ct_div_block tambien necesita custom-css !important
 
 Continuacion del fix de v3.9. Aunque el JSON ahora emitia `margin-left: "auto"` + `margin-left-unit: "auto"` correctamente, el container con `margin: 0 auto` **seguia sin centrarse en Oxygen**.

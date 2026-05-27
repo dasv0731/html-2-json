@@ -1274,6 +1274,22 @@ def convert_properties(props: Dict[str, str], block_type: Optional[str] = None) 
             custom_css.append(f"{real_prop}: {val};")
             continue
 
+        # v3.11: background-image con gradient -> custom-css. Oxygen skipea
+        # background-image en su pipeline normal (controller.css.js:5437)
+        # porque lo maneja via getBackgroundLayersCSS que solo soporta URL,
+        # no gradients (linear/radial/conic). Sin este redirect, gradients
+        # quedan invisibles. Tradeoff: panel Background no muestra el gradient
+        # editable, pero el render visual funciona.
+        if prop == "background-image" and isinstance(val, str):
+            v_low = val.strip().lower()
+            if any(g in v_low for g in (
+                "linear-gradient(", "radial-gradient(", "conic-gradient(",
+                "repeating-linear-gradient(", "repeating-radial-gradient(",
+                "repeating-conic-gradient(",
+            )):
+                custom_css.append(f"background-image: {val};")
+                continue
+
         # Caso especial: transform es array de step-objects (no string).
         # Lo emitimos como nativo directo (Oxygen lo lee en getTransformCSS).
         if prop == "transform" and isinstance(val, list):

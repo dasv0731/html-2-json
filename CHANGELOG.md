@@ -4,6 +4,63 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-27 — v3.20: descendant selectors a clases sintéticas + SVG simple a `oxy_rich_text` (Bug R, Bug S)
+
+Dos mejoras de DX/editabilidad reportadas por el user en Test-02: "los h2 no tienen clase" y "mandas casi todo a code block cuando hay opciones nativas".
+
+### v3.20-A (Bug R): descendant selectors → clases sintéticas asignables
+
+**Problema:** CSS con descendant selectors como `.t02__prose h2 { font-size: 34px; ... }` se ignoraba o caía a `codeblock_rules`. Resultado: los `<h2>` dentro del article no tenían clase asignada en el JSON, y su estilo solo aplicaba en runtime via el global stylesheet (no visible en el builder visual de Oxygen, no editable desde el panel).
+
+**Fix en 3 piezas:**
+
+1. **Nueva función `_classify_descendant_selector(sel)`** que reconoce el patrón `.parent tag` (clase + whitespace + tag, opcionalmente con pseudo). Retorna `(parent_class, descendant_tag, state)`.
+
+2. **`_process_qualified_rule` extendido**: cuando `_classify_selector` retorna None (selector no simple), intenta el nuevo classifier antes de caer a codeblock. Si matchea, genera un nombre sintético `parent--tag` (ej `t02__prose--h2`) y lo trata como una clase normal (mismas reglas, mismos states).
+
+3. **`parse_css` retorna 4 valores** ahora (antes 3): agrega `synthetic_descendants: {synth_name: (parent_class, desc_tag)}`.
+
+4. **Nueva función `apply_synthetic_descendant_classes(component, synthetic_descendants)`**: post-step que recorre el tree en DFS, mantiene un set de ancestor classes, y para cada nodo cuyo tag matchee algún `(parent, tag)` con `parent` en sus ancestros, agrega `parent--tag` a `options.classes`. Se llama después de `html_to_component_tree()` y antes de `collect_used_classes()`.
+
+**Resultado en Test-02 04-sidebar-article:**
+- 15 clases sintéticas generadas: `.t02__prose--h2`, `.t02__prose--h3`, `.t02__prose--p`, `.t02__prose--ul`, `.t02__prose--strong`, `.t02__prose--a`, `.t02__decision--h3`, `.t02__decision--ul`, `.t02__trip-card--ul`, `.t02__toc__list--li`, `.t02__toc__list--a`, etc.
+- Los 7 `<h2>` del article ahora tienen `classes: ["t02__prose--h2"]` editables desde el panel Oxygen.
+- La pseudo-state `::before` también se preserva en la clase sintética (el subrayado rojo del title sigue funcionando).
+
+**Limitaciones:**
+- Solo soporta 2 niveles `.parent tag`. Patrones `.parent ancestor tag`, `.parent tag.cls`, `.parent .cls`, `.parent > tag` siguen cayendo a codeblock.
+- El "tag" del nodo se determina por `options.original.tag` (con fallback a default por block_type).
+
+### v3.20-B (Bug S): SVG inline simple → `oxy_rich_text`
+
+**Problema:** todos los SVGs inline iban a `ct_code_block` (incluso un check icon trivial), saturando el tree con bloques poco editables.
+
+**Fix en `_resolve_block_type` (ruta SVG):**
+
+```python
+complex_tags = ("defs", "pattern", "mask", "filter", "clipPath")
+is_simple = not any(tag.find(t) for t in complex_tags)
+svg_str = _serialize_svg_for_codeblock(tag)
+if is_simple:
+    return ("oxy_rich_text", {
+        "useCustomTag": "true",
+        "tag": "span",
+        "__pre_rich_text__": svg_str,
+    })
+# SVGs con defs/pattern/etc (referencias internas con IDs) siguen como ct_code_block
+return ("ct_code_block", {"code-php": svg_str, "unwrap": "true"})
+```
+
+**`_build_component` extendido:** cuando `block_type == "oxy_rich_text"` y `original` tiene `__pre_rich_text__` (señal especial), usa ese contenido directo como `ct_content` en lugar de re-serializar via `_serialize_inline_to_rich_text` (que no maneja SVG).
+
+**Resultado en Test-02:**
+- Hero: 7 code_blocks → 2 code_blocks + 6 rich_texts. El único code_block restante es el SVG complejo del fondo (con defs+pattern+anillos concéntricos).
+- Sidebar+article: ~70 code_blocks → 3 code_blocks + 61 rich_texts.
+
+**Por qué `oxy_rich_text` y no algún componente "SVG nativo":** Oxygen no tiene un componente "SVG inline" puro sin wrapper. `oxy_rich_text` + `useCustomTag: span` introduce un wrapper inline mínimo que no rompe layouts flex. La ganancia es DX: en el panel del builder aparece como "Rich Text" editable en lugar de "Code Block" opaco.
+
+---
+
 ## 2026-05-27 — v3.19: `grid-child-rules` con `child-index` invertido (Bug Q)
 
 Bug visible en Test-02 `.t02__article-layout` (`grid-template-columns: 4fr 8fr` con sidebar+article): el sidebar quedaba con 67% del ancho en lugar de 33%, y el TOC interno se desbordaba apareciendo como **7 columnas horizontales** (una por cada `<li>` del índice).

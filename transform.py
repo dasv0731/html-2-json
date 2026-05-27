@@ -338,12 +338,21 @@ def fail(msg: str):
 # CSS PARSING
 # ============================================================
 
-def parse_css(css_text: str) -> Tuple[Dict[str, Dict], Dict[str, Dict[str, Dict]], List[Dict]]:
+def parse_css(css_text: str) -> Tuple[
+    Dict[str, Dict],
+    Dict[str, Dict[str, Dict]],
+    List[Dict],
+    Dict[str, Tuple[str, str]],
+]:
     """
-    Parsea CSS y retorna tres estructuras:
+    Parsea CSS y retorna cuatro estructuras:
     - default_rules: {clase: {prop: valor, "__states__": {state: {prop: valor}}}}
     - media_rules: {clase: {breakpoint: {prop: valor, "__states__": {state: {prop: valor}}}}}
     - codeblock_rules: lista de reglas que van al Code Block (selectores complejos)
+    - synthetic_descendants: {synth_class_name: (parent_class, descendant_tag)}
+      v3.20-A: selectores `.parent tag` se promueven a clases sinteticas asignables
+      a nodos del tree post-parsing. Esto vuelve editables en el panel de Oxygen
+      elementos como los h2/h3/p/li que de otro modo solo se estilizan via descendant.
 
     Los states (`hover`, `focus`, `before`, `nth-child(2)`, etc.) se guardan bajo
     la key especial `__states__` que el constructor del JSON va a leer y emitir
@@ -354,6 +363,7 @@ def parse_css(css_text: str) -> Tuple[Dict[str, Dict], Dict[str, Dict[str, Dict]
     default_state_rules: Dict[str, Dict[str, Dict]] = {}
     media_rules: Dict[str, Dict[str, Dict]] = {}
     codeblock_rules: List[Dict] = []
+    synthetic_descendants: Dict[str, Tuple[str, str]] = {}
 
     rules = tinycss2.parse_stylesheet(css_text, skip_whitespace=True, skip_comments=True)
 
@@ -364,7 +374,7 @@ def parse_css(css_text: str) -> Tuple[Dict[str, Dict], Dict[str, Dict[str, Dict]
 
         if rule.type == "qualified-rule":
             # Regla normal (.foo { ... })
-            _process_qualified_rule(rule, default_rules, default_state_rules, codeblock_rules, breakpoint=None)
+            _process_qualified_rule(rule, default_rules, default_state_rules, codeblock_rules, synthetic_descendants, breakpoint=None)
 
         elif rule.type == "at-rule":
             if rule.lower_at_keyword == "media":
@@ -385,7 +395,7 @@ def parse_css(css_text: str) -> Tuple[Dict[str, Dict], Dict[str, Dict[str, Dict]
                 )
                 for inner in inner_rules:
                     if inner.type == "qualified-rule":
-                        _process_qualified_rule(inner, default_rules, default_state_rules, codeblock_rules, breakpoint=bp_name, media_rules=media_rules)
+                        _process_qualified_rule(inner, default_rules, default_state_rules, codeblock_rules, synthetic_descendants, breakpoint=bp_name, media_rules=media_rules)
             else:
                 # @keyframes, @font-face, etc. -> Code Block
                 codeblock_rules.append({
@@ -401,7 +411,7 @@ def parse_css(css_text: str) -> Tuple[Dict[str, Dict], Dict[str, Dict[str, Dict]
             default_rules[cls] = {}
         default_rules[cls]["__states__"] = state_props
 
-    return default_rules, media_rules, codeblock_rules
+    return default_rules, media_rules, codeblock_rules, synthetic_descendants
 
 
 def _parse_media_prelude(prelude) -> Optional[str]:
@@ -427,7 +437,7 @@ def _parse_media_prelude(prelude) -> Optional[str]:
     return None
 
 
-def _process_qualified_rule(rule, default_rules, default_state_rules, codeblock_rules, breakpoint=None, media_rules=None):
+def _process_qualified_rule(rule, default_rules, default_state_rules, codeblock_rules, synthetic_descendants, breakpoint=None, media_rules=None):
     """Procesa una regla qualified-rule y la enruta segun el selector."""
     selector_text = tinycss2.serialize(rule.prelude).strip()
     declarations = _parse_declarations(rule.content)
@@ -437,14 +447,25 @@ def _process_qualified_rule(rule, default_rules, default_state_rules, codeblock_
     for sel in selectors:
         target = _classify_selector(sel)
         if target is None:
-            # Selector complejo -> Code Block
-            codeblock_rules.append({
-                "type": "rule",
-                "selector": sel,
-                "declarations": declarations,
-                "breakpoint": breakpoint,
-            })
-            continue
+            # v3.20-A: probar descendant pattern `.parent tag` antes de caer al codeblock.
+            desc = _classify_descendant_selector(sel)
+            if desc is not None:
+                parent_cls, desc_tag, desc_state = desc
+                synth_cls = f"{parent_cls}--{desc_tag}"
+                synthetic_descendants[synth_cls] = (parent_cls, desc_tag)
+                # Reutilizamos la logica del flujo normal: tratar synth_cls
+                # como si fuera la clase del selector y desc_state como state.
+                # Caemos al codigo de abajo asignando target = (synth_cls, desc_state).
+                target = (synth_cls, desc_state)
+            else:
+                # Selector complejo -> Code Block
+                codeblock_rules.append({
+                    "type": "rule",
+                    "selector": sel,
+                    "declarations": declarations,
+                    "breakpoint": breakpoint,
+                })
+                continue
         cls, state = target
         # Para `content` en before/after: quitar comillas externas porque el JSON
         # real de Oxygen las guarda sin comillas (Oxygen las agrega al renderizar).
@@ -570,6 +591,58 @@ def _classify_selector(sel: str) -> Optional[Tuple[str, Optional[str]]]:
             # Reconstruir la key Oxygen: "nth-child(2)", "nth-child(odd)", etc.
             return (cls, f"{pseudo}({arg})")
         # Pseudo con argumento no soportada (ej: :not(.x)) -> Code Block
+        return None
+
+    return None
+
+
+def _classify_descendant_selector(sel: str) -> Optional[Tuple[str, str, Optional[str]]]:
+    """
+    v3.20-A: clasifica selectores descendant del tipo `.parent tag` y los
+    promueve a clases sintéticas asignables a nodos del tree.
+
+    Retorna (parent_class, descendant_tag, state) o None.
+      .t02__prose h2              -> ("t02__prose", "h2", None)
+      .t02__prose h2::before      -> ("t02__prose", "h2", "before")
+      .t02__hero-cta__list li     -> ("t02__hero-cta__list", "li", None)
+      .t02__toc__list a:hover     -> ("t02__toc__list", "a", "hover")
+
+    NO reconoce (cae al fallback codeblock):
+      .parent child.cls          (tag con clase añadida)
+      .parent .cls               (descendant es clase, no tag)
+      .parent > tag              (child directo con >)
+      .parent ancestor tag       (3 niveles de profundidad)
+    """
+    sel = sel.strip()
+    sel = re.sub(r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/", "", sel).strip()
+
+    # `.parent tag` (sin pseudo)
+    m = re.match(r"^\.([a-zA-Z_][a-zA-Z0-9_-]*)\s+([a-zA-Z][a-zA-Z0-9]*)$", sel)
+    if m:
+        return (m.group(1), m.group(2).lower(), None)
+
+    # `.parent tag::pseudo` o `.parent tag:pseudo` (un punto o dos)
+    m = re.match(
+        r"^\.([a-zA-Z_][a-zA-Z0-9_-]*)\s+([a-zA-Z][a-zA-Z0-9]*)::?([a-zA-Z-]+)$",
+        sel,
+    )
+    if m:
+        parent, tag, pseudo = m.group(1), m.group(2).lower(), m.group(3)
+        if pseudo in NATIVE_SIMPLE_PSEUDO or pseudo in NATIVE_PSEUDO_ELEMENTS:
+            return (parent, tag, pseudo)
+        return None
+
+    # `.parent tag:nth-child(...)` y similares con argumento
+    m = re.match(
+        r"^\.([a-zA-Z_][a-zA-Z0-9_-]*)\s+([a-zA-Z][a-zA-Z0-9]*):([a-zA-Z-]+)\(([^)]+)\)$",
+        sel,
+    )
+    if m:
+        parent, tag, pseudo, arg = (
+            m.group(1), m.group(2).lower(), m.group(3), m.group(4).strip(),
+        )
+        if pseudo in NATIVE_PARAM_PSEUDO:
+            return (parent, tag, f"{pseudo}({arg})")
         return None
 
     return None
@@ -1854,14 +1927,20 @@ def _build_component(tag: Tag, ids: IdAllocator, parent_ct_id: int, depth: int) 
         if text:
             options["ct_content"] = text
     elif block_type == "oxy_rich_text":
-        # Serializar el contenido inline (texto + tags inline) como HTML
-        # Si el oxy_rich_text usa useCustomTag (tag distinto de <p>), no envolver
-        # en <p> porque el useCustomTag ya provee el wrapper externo (<li>, <h2>, etc).
-        # Oxygen acepta contenido inline crudo en ese caso.
-        wrap_in_p = not (isinstance(original, dict) and original.get("useCustomTag") == "true")
-        rich_html = _serialize_inline_to_rich_text(tag, wrap_in_p=wrap_in_p)
-        if rich_html:
-            options["ct_content"] = rich_html
+        # v3.20-B: si _resolve_block_type ya pre-serializo el contenido (caso
+        # SVG simple), usar ese contenido directo en lugar de re-serializar
+        # via _serialize_inline_to_rich_text (que no soporta SVG inline).
+        if isinstance(original, dict) and "__pre_rich_text__" in original:
+            options["ct_content"] = original.pop("__pre_rich_text__")
+        else:
+            # Serializar el contenido inline (texto + tags inline) como HTML.
+            # Si el oxy_rich_text usa useCustomTag (tag distinto de <p>), no envolver
+            # en <p> porque el useCustomTag ya provee el wrapper externo (<li>, <h2>, etc).
+            # Oxygen acepta contenido inline crudo en ese caso.
+            wrap_in_p = not (isinstance(original, dict) and original.get("useCustomTag") == "true")
+            rich_html = _serialize_inline_to_rich_text(tag, wrap_in_p=wrap_in_p)
+            if rich_html:
+                options["ct_content"] = rich_html
 
     # classes
     # v3.4: filtrar clases internas inyectadas por Oxygen (ct-section-inner-wrap,
@@ -2337,10 +2416,26 @@ def _resolve_block_type(tag: Tag) -> Tuple[str, Any]:
             return ("oxy-shape-divider", {
                 "oxy-shape-divider_svg_shape": shape_name,
             })
-        # Ruta C: SVG inline crudo -> ct_code_block
+        # v3.20-B: Ruta C-simple. SVG sin defs/pattern/mask/filter/clipPath
+        # -> oxy_rich_text con useCustomTag span. Mas editable en el panel
+        # (aparece como Rich Text en lugar de Code Block). El render queda
+        # como <span><svg.../></span>; el span no rompe layouts flex porque
+        # es inline por default. SVGs con referencias internas (defs/pattern/
+        # mask/filter/clipPath) requieren IDs unicos no escapeables, asi que
+        # siguen como ct_code_block.
+        complex_tags = ("defs", "pattern", "mask", "filter", "clipPath")
+        is_simple = not any(tag.find(t) for t in complex_tags)
         svg_str = _serialize_svg_for_codeblock(tag)
+        if is_simple:
+            return ("oxy_rich_text", {
+                "useCustomTag": "true",
+                "tag": "span",
+                "__pre_rich_text__": svg_str,
+            })
+
+        # Ruta C: SVG inline complejo (con defs/pattern/etc) -> ct_code_block
         WARN.add(
-            "SVG inline emitido como ct_code_block. "
+            "SVG complejo emitido como ct_code_block. "
             "Considera reemplazar manualmente por icono nativo en Oxygen para editabilidad."
         )
         return ("ct_code_block", {"code-php": svg_str, "unwrap": "true"})
@@ -2849,6 +2944,75 @@ def build_code_block(codeblock_rules: List[Dict], ids: IdAllocator, parent_ct_id
 # RECOLECCION DE CLASES USADAS Y MAPEO A TIPOS
 # ============================================================
 
+def apply_synthetic_descendant_classes(
+    component: Dict,
+    synthetic_descendants: Dict[str, Tuple[str, str]],
+) -> None:
+    """
+    v3.20-A: post-step. Recorre el tree y asigna clases sinteticas generadas
+    desde selectores `.parent tag` a los nodos correspondientes.
+
+    Para cada nodo, si su tag matchea alguna entry de synthetic_descendants
+    y un ancestro tiene la clase parent, agrega la synth_class a options.classes.
+
+    El "tag" del nodo se determina asi:
+      - options.original.tag si existe (ct_div_block con tag custom, ct_headline,
+        ct_text_block/oxy_rich_text con useCustomTag, etc.)
+      - Default por block_type: ct_headline -> "h2", ct_link/ct_link_text -> "a",
+        ct_div_block -> "div", ct_text_block -> "div"
+
+    Modifica el tree en-place. Llamado entre html_to_component_tree() y
+    collect_used_classes() en el flow principal.
+    """
+    if not synthetic_descendants:
+        return
+
+    # Indice {tag: [(parent_cls, synth_cls), ...]}
+    tag_to_rules: Dict[str, List[Tuple[str, str]]] = {}
+    for synth_cls, (parent_cls, tag) in synthetic_descendants.items():
+        tag_to_rules.setdefault(tag, []).append((parent_cls, synth_cls))
+
+    def get_node_tag(node: Dict) -> Optional[str]:
+        opts = node.get("options") or {}
+        original = opts.get("original")
+        if isinstance(original, dict):
+            t = original.get("tag")
+            if t:
+                return str(t).lower()
+        name = node.get("name")
+        if name == "ct_headline":
+            return "h2"  # default Oxygen para headlines
+        if name in ("ct_link", "ct_link_text", "ct_link_button"):
+            return "a"
+        if name in ("ct_text_block", "ct_div_block"):
+            return "div"
+        return None
+
+    def walk(node: Dict, ancestor_classes: set):
+        opts = node.get("options") or {}
+        node_classes = list(opts.get("classes") or [])
+        node_classes_set = set(node_classes)
+
+        tag = get_node_tag(node)
+        if tag and tag in tag_to_rules:
+            for parent_cls, synth_cls in tag_to_rules[tag]:
+                if parent_cls in ancestor_classes and synth_cls not in node_classes_set:
+                    node_classes.append(synth_cls)
+                    node_classes_set.add(synth_cls)
+            # Aplicar al options.classes
+            if node_classes:
+                opts["classes"] = node_classes
+                # Si no tenia activeselector y ahora tiene clases, setear la primera sintetica
+                if not opts.get("activeselector"):
+                    opts["activeselector"] = node_classes[-1]
+
+        new_ancestors = ancestor_classes | node_classes_set
+        for child in node.get("children") or []:
+            walk(child, new_ancestors)
+
+    walk(component, set())
+
+
 def collect_used_classes(component: Dict, out: Optional[Dict[str, str]] = None, tags_out: Optional[Dict[str, str]] = None) -> Tuple[Dict[str, str], Dict[str, str]]:
     """Recorre el arbol de componentes y construye dos mapeos:
     - clase -> tipo de bloque (para excepciones como button-text-color)
@@ -3268,7 +3432,7 @@ def main():
         css = f.read()
 
     # Parsear CSS
-    default_rules, media_rules, codeblock_rules = parse_css(css)
+    default_rules, media_rules, codeblock_rules, synthetic_descendants = parse_css(css)
 
     # Construir arbol de componentes
     ids = IdAllocator(start=2)
@@ -3276,6 +3440,10 @@ def main():
 
     # Post-proceso: colapsar wrappers de iconos cuando es seguro
     component_tree = collapse_icon_wrappers(component_tree, default_rules, media_rules)
+
+    # v3.20-A: aplicar clases sinteticas generadas desde selectores `.parent tag`
+    # ANTES de collect_used_classes para que las nuevas clases se registren.
+    apply_synthetic_descendant_classes(component_tree, synthetic_descendants)
 
     # Recolectar clases usadas
     class_to_block_type, class_to_tag = collect_used_classes(component_tree)

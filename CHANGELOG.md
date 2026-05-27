@@ -4,6 +4,28 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-27 — v3.15: auto `flex-direction: row` tambien con `inline-flex` (Bug N)
+
+Bug visible en Test-01 related-link: `<a class="t01__related-link">` con `display:inline-flex; align-items:center;` (sin flex-direction explicito) apilaba el texto y el SVG verticalmente. El auto-add de `flex-direction: row` del skill solo se aplicaba a `display: flex`, no a `inline-flex`.
+
+### Antes (v3.14)
+
+```python
+if out.get("display") == "flex" and "flex-direction" not in out:
+    out["flex-direction"] = "row"
+```
+
+### Despues (v3.15)
+
+```python
+if out.get("display") in ("flex", "inline-flex") and "flex-direction" not in out:
+    out["flex-direction"] = "row"
+```
+
+Caso real: el botón `Ver todo el blog →` quedaba apilado en columna en lugar de horizontal. Misma causa raíz: Oxygen aplica `flex-direction: column` por default a sus ct_div_block defaults, sin importar si display es `flex` o `inline-flex`.
+
+---
+
 ## 2026-05-27 — v3.14: decimales sin cero inicial (`.65em`, `.5rem`) (Bug M)
 
 Bug visible en Test-01 article: el `::before` de los `<li>` con `top: .65em` quedaba desfasado verticalmente (top no se aplicaba).

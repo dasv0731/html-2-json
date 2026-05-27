@@ -687,9 +687,11 @@ def expand_shorthands(props: Dict[str, str]) -> Dict[str, str]:
     # Preservar __states__ (dict {state_name: {prop: value}})
     if "__states__" in props:
         out["__states__"] = props["__states__"]
-    # Si hay display: flex sin flex-direction explicito, default a row
-    # (Oxygen no asume row por default, necesita el valor explicito)
-    if out.get("display") == "flex" and "flex-direction" not in out:
+    # Si hay display: flex / inline-flex sin flex-direction explicito, default a row.
+    # CSS standard hace row por default cuando user no lo escribe; Oxygen aplica column
+    # por default a ct_div_block lo que rompe layouts horizontales. Aplica tanto a
+    # flex como a inline-flex (v3.15 — antes solo "flex").
+    if out.get("display") in ("flex", "inline-flex") and "flex-direction" not in out:
         out["flex-direction"] = "row"
     return out
 

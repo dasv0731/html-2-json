@@ -2521,6 +2521,18 @@ def build_classes_block(default_rules: Dict, media_rules: Dict, used_classes: Li
         oxygen_props, custom_css_decls = convert_properties(default_props, block_type)
         if custom_css_decls:
             oxygen_props["custom-css"] = " ".join(custom_css_decls)
+        # v3.8: auto align-items:stretch para ct_div_block sin align-items definido.
+        # Oxygen aplica align-items:flex-start por default a ct_div_block, lo que
+        # rompe el block flow del HTML: un <section>/<header>/<div> hijo de otro
+        # ct_div_block NO se estira al 100% del ancho del parent — se encoge al
+        # ancho de su contenido. align-items:stretch restaura el behavior natural.
+        # Aplica solo si:
+        #   - El block_type es ct_div_block (no aplica a text_block/headline/etc.)
+        #   - El user no definio align-items en el CSS (respeta su intencion).
+        # En clases con display:inline-block/block, align-items no afecta (solo
+        # tiene efecto en flex/grid containers), por lo que la regla es inocua.
+        if block_type == "ct_div_block" and "align-items" not in oxygen_props:
+            oxygen_props["align-items"] = "stretch"
         # v3.1: NO inyectamos el `tag` del bloque dentro del original de la clase.
         # `tag` es una opcion del bloque (options.original.tag), no de la clase.
         # Inyectarlo aqui forzaria el mismo tag a cualquier otro bloque que use

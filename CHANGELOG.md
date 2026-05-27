@@ -4,6 +4,33 @@ Registro de cambios incrementales aplicados al skill `oxygen-json-v3` después d
 
 ---
 
+## 2026-05-27 — v3.8: auto `align-items: stretch` para ct_div_block (Test-01 hero overflow)
+
+Bug arquitectónico descubierto durante el aislamiento del hero: `<section class="t01__hero">` (hijo de `<div class="t01">`) no ocupaba el 100% del ancho del parent. Causa raíz: Oxygen aplica `display:flex; flex-direction:column; align-items:flex-start` por default a TODOS los ct_div_block. Con `align-items:flex-start`, los hijos no estiran al ancho del parent — se encogen al ancho de su contenido. Eso rompe el block flow natural de HTML donde `<section>`/`<header>`/`<div>` ocupan 100% del padre.
+
+### Fix
+
+En `build_classes_block`, después de convertir props, si:
+- `block_type == "ct_div_block"`, y
+- el CSS del user NO define `align-items`,
+
+entonces auto-añadir `align-items: stretch`. En clases con `display:inline-block`/`block`/etc. (no flex containers) la regla es inocua (align-items solo afecta flex/grid). En clases con flex explícito, restaura el behavior natural de HTML donde los hijos block-level ocupan 100% del ancho.
+
+### Side effects controlados
+
+- Clases con `align-items` explícito (`flex-start`, `center`, etc.) se respetan tal cual.
+- Clases con `flex-direction: row` reciben stretch que afecta height (matchea default flex-row de browser).
+- Clases con `display: grid` reciben stretch (default grid también).
+
+### Validación
+
+Re-corrido de Test-01/01-hero:
+- `.t01` ahora emite `align-items: stretch` → `<section class="t01__hero">` ocupa 100% width.
+- `.t01__hero-main` mantiene `align-items: flex-start` (definido por user).
+- `.t01__heroCta-list` agrega `align-items: stretch` → los `<li>` ocupan 100% (matchea `.t01__btn--full`).
+
+---
+
 ## 2026-05-26 — v3.7: tags vacios decorativos -> ct_div_block (post-render Test-01 round 2)
 
 Bug descubierto al ver el segundo render de Test-01: spans/lis/buttons HTML vacíos (típicamente decorativos con dimensiones via CSS, ej. `<span class="brand-mark" aria-hidden></span>` como cuadradito de color) se mapeaban a `ct_text_block`. Oxygen renderiza un placeholder/label visible en ct_text_blocks sin `ct_content`, descuadrando todo el layout del decorativo.
